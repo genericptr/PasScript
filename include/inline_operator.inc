@@ -1,0 +1,1 @@
+{$ifdef inline_operator}inline;{$endif}

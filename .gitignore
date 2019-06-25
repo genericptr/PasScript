@@ -1,0 +1,12 @@
+
+.fpcbuild
+.vscode
+*.sublime-*
+*.code-*
+/output
+/tests
+
+# specific files
+test
+pps
+test.pas
