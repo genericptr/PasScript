@@ -5,9 +5,12 @@
 unit PasScript;
 interface
 uses
-  CTypes, Math, SysUtils, BaseUnix;
+  CTypes, Math, SysUtils, BaseUnix, Sockets, Scanner, Variants;
+
+{$define inline_operator}
 
 {$define INTERFACE}
+{$include include/Math.inc}
 {$include include/Values.inc}
 {$include include/List.inc}
 {$include include/Dictionary.inc}
@@ -18,6 +21,8 @@ uses
 {$include include/StrUtils.inc}
 {$include include/FileUtils.inc}
 {$include include/ProcessUtils.inc}
+{$include include/WebUtils.inc}
+{$include include/JSONUtils.inc}
 {$undef INTERFACE}
 
 var
@@ -28,9 +33,15 @@ var
   FPC_FILE_NAME: ansistring = '';
   FPC_DIR: ansistring = '';
 
+const
+  FLAG_PPS_SRC = 'pps_src';
+
+procedure InitThread;
+
 implementation
 
 {$define IMPLEMENTATION}
+{$include include/Math.inc}
 {$include include/BaseUnix.inc}
 {$include include/PrivateUtils.inc}
 {$include include/Values.inc}
@@ -43,22 +54,19 @@ implementation
 {$include include/StrUtils.inc}
 {$include include/FileUtils.inc}
 {$include include/ProcessUtils.inc}
+{$include include/WebUtils.inc}
+{$include include/JSONUtils.inc}
 {$undef IMPLEMENTATION}
 
+procedure InitThread;
 begin
-  ParseCommandLine;
+  SharedRegex := nil;
+  SharedProcess := nil;
+end;
 
-  // add executable to argv
-  argv['exec'] := ParamStr(0);
-
-  // TODO: this will be wrong if we use pps because the exec is in temporary dir!
-  // pps needs to pas source file as params --fpc_source
-  FPC_FILE_PATH := ParamStr(0)+'.pas';
-  FPC_FILE_NAME := basename(FPC_FILE_PATH);
-  FPC_DIR := dirname(FPC_FILE_PATH);
-
-
+begin
   {$define CODE}
+  {$include include/Math.inc}
   {$include include/Values.inc}
   {$include include/List.inc}
   {$include include/Dictionary.inc}
@@ -69,5 +77,24 @@ begin
   {$include include/StrUtils.inc}
   {$include include/FileUtils.inc}
   {$include include/ProcessUtils.inc}
+  {$include include/WebUtils.inc}
+  {$include include/JSONUtils.inc}
   {$undef CODE}
+
+  ParseCommandLine;
+
+  // add executable to argv
+  argv['exec'] := ParamStr(0);
+
+  // if the file was run from pps then we can get
+  // additional command line arguments about the script
+  if argv[FLAG_PPS_SRC] then
+    begin
+      FPC_FILE_PATH := argv[FLAG_PPS_SRC];
+      FPC_FILE_NAME := basename(FPC_FILE_PATH);
+      FPC_DIR := dirname(FPC_FILE_PATH);
+    end;
+
+  // init main thread
+  InitThread;
 end.

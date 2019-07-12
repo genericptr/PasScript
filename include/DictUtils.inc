@@ -14,15 +14,30 @@ type
       function GetValue(index: integer): TValue; override;
       procedure SetValue(index: integer; newValue: TValue); override;
     public
-      constructor Create (constref newValue: TDictionary);
-      function Str: string; override;
-    private
       value: TDictionary;
+      constructor Create (constref newValue: TDictionary); overload;
+      constructor Create; overload;
+      function Str: ansistring; override;
+      function MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring; override;
+      function Copy: TValue; override;
   end;
+
+operator explicit(right: TDictionary): TValue; {$i inline_operator}
+operator := (right: TDictionary): TValue; {$i inline_operator}
 
 {$endif}
 
 {$ifdef IMPLEMENTATION}
+
+operator explicit(right: TDictionary): TValue;
+begin
+  result := TDictValue.Create(right);
+end;
+
+operator := (right: TDictionary): TValue;
+begin
+  result := TDictValue.Create(right);
+end;
 
 constructor TDictValue.Create (constref newValue: TDictionary);
 begin
@@ -30,10 +45,24 @@ begin
   typ := TDictType;
 end;
 
-function TDictValue.Str: string;
+constructor TDictValue.Create;
 begin
-  // TODO: TDictionary.Str
-  result := 'TODO: [dict]';
+  typ := TDictType;
+end;
+
+function TDictValue.Str: ansistring;
+begin
+  result := value.Str;
+end;
+
+function TDictValue.MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring;
+begin
+  result := value.MakeFormattedString(indent, formatting);
+end;
+
+function TDictValue.Copy: TValue;
+begin
+  result := TDictValue.Create(value);
 end;
 
 function TDictValue.GetValue(index: integer): TValue;

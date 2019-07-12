@@ -15,8 +15,9 @@ end;
 
 procedure Fatal(msg: string);
 begin
-  writeln(msg);
-  halt(-1);
+  writeln('FATAL: '+msg);
+  //system.halt(code);
+  raise Exception.Create(msg);
 end;
 
 procedure Halt(code: integer = 0; msg: string = '');

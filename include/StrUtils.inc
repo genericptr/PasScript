@@ -2,7 +2,6 @@
 
 // TODO: we need to make generic versions of these because ansistrings need to allocate new strings
 // wait until we get the implicit spez patch applied
-ddd
 
 type
   LongString = ansistring;
@@ -11,6 +10,12 @@ type
   ShortString = string;
   ShortStringIndex = integer;
 
+type
+  TCharSet = set of char;
+const
+  // TODO: tabs?
+  WhiteSpaceCharacters = [chr(32), chr(12), chr(10)];
+
 function Explode(input: ansistring; delimiter: string): TList; 
 function Implode(constref list: TList; glue: string = ''): ansistring;
 function Substr(subject: ansistring; const start: longint; len: longint = 0): ansistring; inline;
@@ -18,10 +23,15 @@ function Substr(subject: string; const start: integer; len: integer = 0): string
 function Strpos(subject: ansistring; search: ansistring; offset: longint = 0): longint;
 function Replace(search: LongString; replacement: LongString; subject: LongString; replaceAll: boolean = true): LongString; overload;
 function Replace(subject: LongString; replacement: LongString; start: LongStringIndex; len: LongStringIndex): LongString; overload;
-function StrCopy(subject: LongString; offset: LongStringIndex; count: LongStringIndex): LongString; inline;
+function StrCopy(subject: LongString; offset: LongStringIndex; count: LongStringIndex): LongString;
+function StrCaseCmp(left, right: string): boolean;
 
 function HasPrefix(subject: ansistring; prefix: string): boolean;
 function HasSuffix(subject: ansistring; suffix: string): boolean;
+
+function Trim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
+function LTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
+function RTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
 
 type
   TLongStringHelpers = type helper for LongString
@@ -34,6 +44,9 @@ type
     procedure Contract(count: LongStringIndex); inline;
     function HasPrefix(prefix: string): boolean; inline;
     function HasSuffix(suffix: string): boolean; inline;
+    function ToInt: integer; inline;
+    function ToFloat: float; inline;
+    function ToBool: boolean; inline;
   end;
 
 type
@@ -41,24 +54,44 @@ type
     function Length: ShortStringIndex; inline;
     function High: ShortStringIndex; inline;
     function Explode(delimiter: string): TList; inline;
-    function Str(start: ShortStringIndex; len: ShortStringIndex = 0): ShortString; inline;
+    function Sub(start: ShortStringIndex; len: ShortStringIndex = 0): ShortString; inline;
     function Pos(search: string): ShortStringIndex; inline;
     function HasPrefix(prefix: string): boolean; inline;
     function HasSuffix(suffix: string): boolean; inline;
+    function ToInt: integer; inline;
+    function ToFloat: float; inline;
+    function ToBool: boolean; inline;
   end;
 
 // implicit string conversions
-operator := (right: integer): string;
+operator := (right: longint): string;
 operator := (right: float): string;
 
 // string conversions
-function tostr(value: integer): string; overload; inline;
-function tostr(value: float): string; overload; inline;
-function tostr(value: boolean): string; overload; inline;
+function ToStr(value: longint): string; overload; inline;
+function ToStr(value: double): string; overload; inline;
+function ToStr(value: boolean): string; overload; inline;
 
-function toint(value: string): integer; overload; inline;
-function toint(value: string): float; overload; inline;
-function toint(value: string): boolean; overload; inline;
+function ToInt(value: string): integer; inline;
+function ToFloat(value: string): float; inline;
+function ToBool(value: string): boolean; inline;
+
+function FormatString(value: ansistring; formatting: TStringFormatting): ansistring;
+
+type
+  TIntegerStringHelper = type helper for integer
+    function ToStr: string; inline;
+  end;
+
+type
+  TFloatStringHelper = type helper for float
+    function ToStr: string; inline;
+  end;
+
+type
+  TBooleanStringHelper = type helper for float
+    function ToStr: string; inline;
+  end;
 
 {$endif}
 
@@ -74,17 +107,17 @@ begin
   result := FloatToStr(right);
 end;
 
-function tostr(value: integer): string;
+function ToStr(value: longint): string;
 begin
   result := IntToStr(value);
 end;
 
-function tostr(value: float): string;
+function ToStr(value: double): string;
 begin
   result := FloatToStr(value);
 end;
 
-function tostr(value: boolean): string;
+function ToStr(value: boolean): string;
 begin
   if value then
     result := 'true'
@@ -92,24 +125,50 @@ begin
     result := 'false';
 end;
 
-function toint(value: string): integer;
+function ToInt(value: string): integer;
 begin
   result := StrToInt(value);
 end;
 
-function toint(value: string): float;
+function ToFloat(value: string): float;
 begin
   result := StrToFloat(value);
 end;
 
-function toint(value: string): boolean;
+function ToBool(value: string): boolean;
 begin
-  if value = 'true' then
+  if strcasecmp(value, 'true') then
     result := true
-  else if value = 'false' then
+  else if strcasecmp(value, 'false') then
     result := false
   else
     fatal('toint string is not valid boolean.');
+end;
+
+function FormatString(value: ansistring; formatting: TStringFormatting): ansistring;
+begin
+  result := value;
+  if TStringFormatJSON in formatting then
+    result := '"'+result+'"';
+end;
+
+//$bookmark -
+//$bookmark ORDINAL HELPERS
+//$bookmark -
+
+function TIntegerStringHelper.ToStr: string;
+begin
+  result := PasScript.ToStr(self);
+end;
+
+function TFloatStringHelper.ToStr: string;
+begin
+  result := PasScript.ToStr(self);
+end;
+
+function TBooleanStringHelper.ToStr: string;
+begin
+  result := PasScript.ToStr(self);
 end;
 
 
@@ -132,12 +191,12 @@ begin
   result := PasScript.Explode(self, delimiter);
 end;
 
-function TLongStringHelpers.Substr(start: LongStringIndex; len: LongStringIndex = 0): LongString;
+function TLongStringHelpers.Sub(start: LongStringIndex; len: LongStringIndex = 0): LongString;
 begin
   result := PasScript.Substr(self, start, len);
 end;
 
-function TLongStringHelpers.Strpos(search: string): LongStringIndex;
+function TLongStringHelpers.Pos(search: string): LongStringIndex;
 begin
   result := PasScript.Strpos(self, search);
 end;
@@ -154,12 +213,25 @@ end;
 
 function TLongStringHelpers.HasPrefix(prefix: string): boolean;
 begin
-  result := HasPrefix(self, prefix);  
+  result := PasScript.HasPrefix(self, prefix);  
 end;
 
 function TLongStringHelpers.HasSuffix(suffix: string): boolean;
 begin
-  result := HasSuffix(self, prefix)  
+  result := PasScript.HasSuffix(self, suffix)  
+end;
+
+function TLongStringHelpers.ToInt: integer;
+begin
+  result := PasScript.ToInt(self);
+end;
+function TLongStringHelpers.ToFloat: float;
+begin
+  result := PasScript.ToFloat(self);
+end;
+function TLongStringHelpers.ToBool: boolean;
+begin
+  result := PasScript.ToBool(self);
 end;
 
 function TShortStringHelpers.Length: ShortStringIndex;
@@ -177,33 +249,91 @@ begin
   result := PasScript.Explode(self, delimiter);
 end;
 
-function TShortStringHelpers.Substr(start: ShortStringIndex; len: ShortStringIndex = 0): ShortString;
+function TShortStringHelpers.Sub(start: ShortStringIndex; len: ShortStringIndex = 0): ShortString;
 begin
   result := PasScript.Substr(self, start, len);
 end;
 
-function TShortStringHelpers.Strpos(search: string): ShortStringIndex;
+function TShortStringHelpers.Pos(search: string): ShortStringIndex;
 begin
   result := PasScript.Strpos(self, search);
 end;
 
 function TShortStringHelpers.HasPrefix(prefix: string): boolean;
 begin
-  result := HasPrefix(self, prefix);  
+  result := PasScript.HasPrefix(self, prefix);  
 end;
 
 function TShortStringHelpers.HasSuffix(suffix: string): boolean;
 begin
-  result := HasSuffix(self, prefix)  
+  result := PasScript.HasSuffix(self, suffix); 
+end;
+
+function TShortStringHelpers.ToInt: integer;
+begin
+  result := PasScript.ToInt(self);
+end;
+function TShortStringHelpers.ToFloat: float;
+begin
+  result := PasScript.ToFloat(self);
+end;
+function TShortStringHelpers.ToBool: boolean;
+begin
+  result := PasScript.ToBool(self);
 end;
 
 //$bookmark -
 //$bookmark FUNCTIONS
 //$bookmark -
 
-function Compare(a, b: char): boolean; inline
+function Compare(a, b: char): boolean; inline;
 begin
   result := a = b;
+end;
+
+function Trim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
+var
+  i: integer;
+  left, right: integer;
+begin
+  i := 1;
+
+  // trim left
+  while subject[i] in mask do
+    inc(i);
+  left := i;
+
+  // trim right
+  i := length(subject);
+  while subject[i] in mask do
+    dec(i);
+  right := i;
+
+  result := strcopy(subject, left, (right - left) + 1);
+end;
+
+function LTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
+var
+  i: integer;
+  left: integer;
+begin
+  i := 1;
+  while subject[i] in mask do
+    inc(i);
+  writeln(i);
+  result := strcopy(subject, i, (length(subject) - i) + 1);
+end;
+
+// https://www.php.net/manual/en/function.rtrim.php
+function RTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
+var
+  i: integer;
+  right: integer;
+begin
+  i := length(subject);
+  while subject[i] in mask do
+    dec(i);
+  result := strcopy(subject, 1, i);
 end;
 
 // TODO: case sensitivity
@@ -221,10 +351,11 @@ function HasSuffix(subject: ansistring; suffix: string): boolean;
 var
   i: longint;
 begin
+  fatal('not done');
   result := true;
-  for i := length(prefix) - length(suffix) to length(prefix) do
-    if not Compare(subject[i], prefix[i]) then
-      exit(false);
+  //for i := length(suffix) - length(suffix) to length(prefix) do
+  //  if not Compare(subject[i], prefix[i]) then
+  //    exit(false);
 end;
 
 
@@ -316,6 +447,16 @@ function StrCopy(subject: LongString; offset: LongStringIndex; count: LongString
 begin
   SetLength(result, count);
   Move(subject[offset], result[1], count);
+end;
+
+function StrCaseCmp(left, right: string): boolean;
+var
+  i: integer;
+begin
+  result := true;
+  for i := 1 to length(left) do
+    if UpperCase(left[i]) <> UpperCase(right[i]) then
+      exit(false);
 end;
 
 // TODO: case sensitivity

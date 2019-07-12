@@ -24,8 +24,9 @@ procedure closedir(handle: TFileHandle);
 function is_dir(path: ansistring): boolean;
 function is_file(path: ansistring): boolean;
 function is_link(path: ansistring): boolean;
+function readlink(path: ansistring): ansistring; inline;
 
-function file_exists(path: ansistring): boolean;
+function exists(path: ansistring): boolean;
 function file_parts(path: ansistring): TFileParts;
 function basename(path: ansistring; extension: boolean = true): ansistring;
 function dirname(path: ansistring): ansistring;
@@ -35,21 +36,37 @@ procedure chdir(dir: ansistring); inline;
 
 function ExpandTilde(str: ansistring): ansistring;
 
+//$bookmark DATE & TIME 
+
+function TimeSinceNow: longint;
+
 //$bookmark STRING HELPERS
 
-type
-  TLongStringFileHelpers = type helper for LongString
-    function ExpandTilde: ansistring;
-  end;
+  type
+    TLongStringFileHelpers = type helper for LongString
+      function ExpandTilde: ansistring;
+    end;
 
-type
-  TShortStringFileHelpers = type helper for ShortString
-    function ExpandTilde: string;
-  end;
+  type
+    TShortStringFileHelpers = type helper for ShortString
+      function ExpandTilde: string;
+    end;
 
 {$endif}
 
 {$ifdef IMPLEMENTATION}
+
+//function SystemTime: double;
+//var
+//  now: TDateTime;
+//begin
+//  result := TimeStampToMSecs(DateTimeToTimeStamp(Now)) / 1000;
+//end;  
+  
+function TimeSinceNow: longint;
+begin
+  result := round(TimeStampToMSecs(DateTimeToTimeStamp(Now)));
+end;    
 
 function TLongStringFileHelpers.ExpandTilde: ansistring;
 begin
@@ -76,7 +93,7 @@ begin
   result := replace('~', '/Users/'+SystemUserName, str, false);
 end;
 
-function file_exists(path: ansistring): boolean;
+function exists(path: ansistring): boolean;
 var
   info : stat;
 begin
@@ -173,10 +190,15 @@ function is_link(path: ansistring): boolean;
 var
   info : stat;
 begin
-  if fpstat(path,info) = 0 then
+  if fpStat(path,info) = 0 then
     result := fpS_ISLNK(info.st_mode)
   else
     result := false;
+end;
+
+function readlink(path: ansistring): ansistring;
+begin
+  result := fpReadLink(path);
 end;
 
 function opendir(path: ansistring): TFileHandle;
@@ -279,11 +301,15 @@ if (file) {
 
 *)
 
+// TODO: we have some more generic FPC functions for file access
+// probably better to use this than darwin
+// https://www.freepascal.org/docs-html/rtl/sysutils/filecreate.html
+
 function file_get_contents(path: ansistring): ansistring;
 var
   f: File;
 begin
-  if not file_exists(path) then
+  if not exists(path) then
     exit('');
   try
     AssignFile(f, path);

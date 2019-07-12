@@ -3,19 +3,54 @@
 type
   float = single;
 
+const
+  kOrderedDescending = -1;
+  kOrderedAscending = 1;
+  kOrderedSame = 0;
+type
+  TOrdered = integer;
+
+type
+  TComparatorResult = integer;
+  TComparatorResultHelper = type helper for TComparatorResult
+    function GreaterThan: boolean;
+    function LessThan: boolean;
+    function GreaterThanOrEqualTo: boolean;
+    function LessThanOrEqualTo: boolean;
+    function EqualTo: boolean;
+  end;
+
+// TODO: implement these for TValue and TLIst, TDict
+// TODO: use variant instead of overloads
+type
+  ICollection = interface
+    procedure Add(value: variant);
+    procedure Add(key: string; value: variant);
+  end;
+
+type
+  TStringFormat = (TStringFormatJSON);
+  TStringFormatting = set of TStringFormat;
+
 type
   TValueType = (TIntegerType, TFloatType, TStringType, TBoolType, TListType, TDictType);
+  PValue = ^TValue;
   TValue = class
+    // TODO: make this part of the type data set
+    public
+      temp: boolean;
     private
       typ: TValueType;
     private
       function GetValue(index: integer): TValue; virtual;
       procedure SetValue(index: integer; newValue: TValue); virtual;
     public
-      function Copy: TValue; virtual; abstract;
-      function Str: string; virtual;
-      function DebugString: string; virtual;
+      function Copy: TValue; virtual;
+      function Str: ansistring; virtual;
+      function DebugString: ansistring; virtual;
+      function MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring; virtual;
       function IsValid: boolean; virtual;
+      function Compare(other: TValue): TOrdered; virtual;
       procedure Show;
       property Subscript[index: integer]: TValue read GetValue write SetValue; default;
   end;
@@ -24,8 +59,9 @@ type
       class function DefaultValue: integer;
       constructor Create (newValue: integer);
       function Copy: TValue; override;
-      function Str: string; override;
+      function Str: ansistring; override;
       function IsValid: boolean; override;
+      function Compare(other: TValue): TOrdered; override;
     public
       value: integer;
   end;
@@ -34,8 +70,9 @@ type
       class function DefaultValue: float;
       constructor Create (newValue: float);
       function Copy: TValue; override;
-      function Str: string; override;
+      function Str: ansistring; override;
       function IsValid: boolean; override;
+      function Compare(other: TValue): TOrdered; override;
     public
       value: float;
   end;
@@ -44,8 +81,10 @@ type
       class function DefaultValue: string;
       constructor Create (newValue: ansistring);
       function Copy: TValue; override;
-      function Str: string; override;
+      function Str: ansistring; override;
+      function MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring; override;
       function IsValid: boolean; override;
+      function Compare(other: TValue): TOrdered; override;
     public
       value: ansistring;
     private
@@ -58,15 +97,53 @@ type
       class function DefaultValue: boolean;
       constructor Create (newValue: boolean);
       function Copy: TValue; override;
-      function Str: string; override;
+      function Str: ansistring; override;
       function IsValid: boolean; override;
+      function Compare(other: TValue): TOrdered; override;
     public
       value: boolean;
   end;
+  TUnassignedValue = class (TValue)
+    public
+      function Copy: TValue; override;
+  end;
 
-// TODO: this is crap. lets ask fpc if they'll let us make class operators
-// that that DONT return the actual class types
-{$define inline_operator}
+// TODO: allows enabling constref in setters
+// https://bugs.freepascal.org/view.php?id=35821
+{$varpropsetter on}
+type
+  generic TRefCountedArray<T> = class
+    public type
+      TInternalArray = array of T;
+      TArrayIndex = longint;
+    private type
+      TReference = ^T;
+    private
+     refCount: integer;
+     values: TInternalArray;
+
+     constructor Create(newLength: integer = 0);
+     function GetLength: TArrayIndex;
+     procedure SetLength(len: TArrayIndex);
+
+     // ref counting
+     procedure AddRef;
+     procedure Finalize;
+
+     // access
+     function GetValue(index: TArrayIndex): T; inline;
+     procedure SetValue(index: TArrayIndex; constref value: T); inline; 
+     property PrivateValues[index: TArrayIndex]: T read GetValue write SetValue; default;
+
+     // references
+     function GetReference(index: TArrayIndex): TReference; inline;
+     procedure SetReference(index: TArrayIndex; value: TReference); inline; 
+     property Refs[index: TArrayIndex]: TReference read GetReference write SetReference;
+  end;
+{$varpropsetter off}
+
+// assignment
+operator explicit (right: Variant): TValue; {$i inline_operator}
 
 operator := (right: TValue): integer; {$i inline_operator}
 operator := (right: TValue): float; {$i inline_operator}
@@ -78,15 +155,46 @@ operator := (right: TValue): boolean; {$i inline_operator}
 operator := (right: integer): TValue; {$i inline_operator}
 operator := (right: float): TValue; {$i inline_operator}
 operator := (right: string): TValue; {$i inline_operator}
+operator := (right: boolean): TValue; {$i inline_operator}
 
-operator = (left: TValue; right: integer): boolean; {$i inline_operator}
-operator = (left: TValue; right: float): boolean; {$i inline_operator}
-operator = (left: TValue; right: string): boolean; {$i inline_operator}
+// comparison
+// note: we need add {} to fix syntax parsing for "operator = "
+{} operator = (left: TValue; right: integer): boolean; {$i inline_operator}
+{} operator = (left: TValue; right: float): boolean; {$i inline_operator}
+{} operator = (left: TValue; right: string): boolean; {$i inline_operator}
+{} operator = (left: TValue; right: boolean): boolean; {$i inline_operator}
+{} 
+{} operator = (left: integer; right: TValue): boolean; {$i inline_operator}
+{} operator = (left: float; right: TValue): boolean; {$i inline_operator}
+{} operator = (left: string; right: TValue): boolean; {$i inline_operator}
+{} operator = (left: boolean; right: TValue): boolean; {$i inline_operator}
 
-operator = (left: integer; right: TValue): boolean; {$i inline_operator}
-operator = (left: float; right: TValue): boolean; {$i inline_operator}
-operator = (left: string; right: TValue): boolean; {$i inline_operator}
+operator > (left: TValue; right: integer): boolean; {$i inline_operator}
+operator > (left: TValue; right: float): boolean; {$i inline_operator}
+operator > (left: TValue; right: string): boolean; {$i inline_operator}
+operator > (left: TValue; right: boolean): boolean; {$i inline_operator}
 
+operator < (left: TValue; right: integer): boolean; {$i inline_operator}
+operator < (left: TValue; right: float): boolean; {$i inline_operator}
+operator < (left: TValue; right: string): boolean; {$i inline_operator}
+operator < (left: TValue; right: boolean): boolean; {$i inline_operator}
+
+//operator >= (left: TValue; right: integer): boolean; {$i inline_operator}
+//operator >= (left: TValue; right: float): boolean; {$i inline_operator}
+//operator >= (left: TValue; right: string): boolean; {$i inline_operator}
+//operator >= (left: TValue; right: boolean): boolean; {$i inline_operator}
+
+//operator <= (left: TValue; right: integer): boolean; {$i inline_operator}
+//operator <= (left: TValue; right: float): boolean; {$i inline_operator}
+//operator <= (left: TValue; right: string): boolean; {$i inline_operator}
+//operator <= (left: TValue; right: boolean): boolean; {$i inline_operator}
+
+//operator <> (left: TValue; right: integer): boolean; {$i inline_operator}
+//operator <> (left: TValue; right: float): boolean; {$i inline_operator}
+//operator <> (left: TValue; right: string): boolean; {$i inline_operator}
+//operator <> (left: TValue; right: boolean): boolean; {$i inline_operator}
+
+// arithmetic
 operator + (left: TValue; right: integer): integer; {$i inline_operator}
 operator + (left: TValue; right: float): float; {$i inline_operator}
 operator + (left: TValue; right: string): string; {$i inline_operator}
@@ -95,9 +203,101 @@ operator + (left: integer; right: TValue): integer; {$i inline_operator}
 operator + (left: float; right: TValue): float; {$i inline_operator}
 operator + (left: string; right: TValue): string; {$i inline_operator}
 
+// unary
+operator not (left: TValue): boolean;
+
 {$endif}
 
 {$ifdef IMPLEMENTATION}
+
+//$bookmark -
+//$bookmark COMPARATOR
+//$bookmark -
+
+function TComparatorResultHelper.GreaterThan: boolean;
+begin
+  result := (self = kOrderedAscending);
+end;
+
+function TComparatorResultHelper.LessThan: boolean;
+begin
+  result := (self = kOrderedDescending);
+end;
+
+function TComparatorResultHelper.GreaterThanOrEqualTo: boolean;
+begin
+  result := (self = kOrderedAscending) or (self = kOrderedSame);
+end;
+
+function TComparatorResultHelper.LessThanOrEqualTo: boolean;
+begin
+  result := (self = kOrderedDescending) or (self = kOrderedSame);
+end;
+
+function TComparatorResultHelper.EqualTo: boolean;
+begin
+  result := (self = kOrderedSame);
+end;
+
+//$bookmark -
+//$bookmark REF COUNTED ARRAY
+//$bookmark -
+
+constructor TRefCountedArray.Create(newLength: integer = 0);
+begin
+  refCount := 1;
+  if newLength > 0 then
+    SetLength(newLength);
+end;
+
+procedure TRefCountedArray.AddRef;
+begin
+  refCount += 1;
+end;
+
+procedure TRefCountedArray.Finalize;
+begin
+  refCount -= 1;
+end;
+
+function TRefCountedArray.GetLength: integer;
+begin
+  result := Length(values);
+end;
+
+procedure TRefCountedArray.SetLength(len: integer);
+begin
+  System.SetLength(values, len);
+end;
+
+function TRefCountedArray.GetReference(index: TArrayIndex): TReference;
+begin
+  result := @values[index]
+end;
+
+procedure TRefCountedArray.SetReference(index: TArrayIndex; value: TReference);
+begin
+  values[index] := value^;
+end;
+
+function TRefCountedArray.GetValue(index: TArrayIndex): T;
+begin
+  result := values[index];
+end;
+
+procedure TRefCountedArray.SetValue(index: TArrayIndex; constref value: T);
+begin
+  values[index] := value;
+end;
+
+//$bookmark UNASSIGNED VALUE
+
+function TUnassignedValue.Copy: TValue;
+begin
+  fatal('unassigned values can not be copied');
+  result := nil;
+end;
+
 
 //$bookmark INTEGER VALUE
 
@@ -112,7 +312,7 @@ begin
   typ := TIntegerType;
 end;
 
-function TIntegerValue.Str: string;
+function TIntegerValue.Str: ansistring;
 begin
   result := tostr(value);
 end;
@@ -125,6 +325,16 @@ end;
 function TIntegerValue.IsValid: boolean;
 begin
   result := (value <> DefaultValue);
+end;
+
+function TIntegerValue.Compare(other: TValue): TOrdered;
+begin
+  if other > value then
+    result := kOrderedAscending
+  else if other < value then
+    result := kOrderedDescending
+  else
+    result := kOrderedSame;
 end;
 
 //$bookmark FLOAT VALUE
@@ -140,7 +350,7 @@ begin
   typ := TFloatType;
 end;
 
-function TFloatValue.Str: string;
+function TFloatValue.Str: ansistring;
 begin
   result := tostr(value);
 end;
@@ -153,6 +363,16 @@ end;
 function TFloatValue.IsValid: boolean;
 begin
   result := (value <> DefaultValue);
+end;
+
+function TFloatValue.Compare(other: TValue): TOrdered;
+begin
+  if other > value then
+    result := kOrderedAscending
+  else if other < value then
+    result := kOrderedDescending
+  else
+    result := kOrderedSame;
 end;
 
 //$bookmark STRING VALUE
@@ -168,9 +388,14 @@ begin
   typ := TStringType;
 end;
 
-function TStringValue.Str: string;
+function TStringValue.Str: ansistring;
 begin
   result := value;
+end;
+
+function TStringValue.MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring;
+begin
+  result := FormatString(value, formatting);
 end;
 
 function TStringValue.GetPChar: pchar;
@@ -199,6 +424,19 @@ begin
   result := (value <> DefaultValue);
 end;
 
+function TStringValue.Compare(other: TValue): TOrdered;
+var
+  r: integer;
+begin
+  r := CompareText(value, other.str);
+  if r > 0 then
+    result := kOrderedAscending
+  else if r < 0 then
+    result := kOrderedDescending
+  else
+    result := kOrderedSame;
+end;
+
 //$bookmark BOOLEAN VALUE
 
 class function TBooleanValue.DefaultValue: boolean;
@@ -212,7 +450,7 @@ begin
   typ := TBoolType;
 end;
 
-function TBooleanValue.Str: string;
+function TBooleanValue.Str: ansistring;
 begin
   result := tostr(value);
 end;
@@ -227,9 +465,28 @@ begin
   result := value <> DefaultValue;
 end;
 
+function TBooleanValue.Compare(other: TValue): TOrdered;
+begin
+  if other > value then
+    result := kOrderedAscending
+  else if other < value then
+    result := kOrderedDescending
+  else
+    result := kOrderedSame;
+end;
+
 //$bookmark BASE VALUE
 
-function TValue.Str: string;
+function TValue.Copy: TValue;
+begin
+  result := nil;
+  if ClassType = TValue then
+    fatal('can''t copy generic value')
+  else
+    fatal(ClassName+' must implement copy');
+end;
+
+function TValue.Str: ansistring;
 begin
   result := '';
 end;
@@ -239,7 +496,12 @@ begin
   writeln(DebugString);
 end;
 
-function TValue.DebugString: string;
+function TValue.DebugString: ansistring;
+begin
+  result := Str;
+end;
+
+function TValue.MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring;
 begin
   result := Str;
 end;
@@ -258,11 +520,33 @@ procedure TValue.SetValue(index: integer; newValue: TValue);
 begin
 end;
 
+function TValue.Compare(other: TValue): TOrdered;
+begin
+  fatal('can''t compare untyped values');
+end;
+
 //$bookmark -
 //$bookmark OPERATORS
 //$bookmark -
 
 //$bookmark assignment operators
+
+// https://wiki.freepascal.org/Variant
+operator explicit (right: Variant): TValue;
+begin
+  case varType(right) of
+    varString, varStrArg, varOleStr:
+      result := TStringValue.Create(ansistring(right));
+    varSingle, varDouble:
+      result := TFloatValue.Create(float(right));
+    varShortInt, varSmallint, varInteger, varByte, varWord:
+      result := TIntegerValue.Create(integer(right));
+    varBoolean:
+      result := TBooleanValue.Create(boolean(right));
+    otherwise
+      fatal('variant conversion not supported '+varToStr(right));
+  end;
+end;
 
 operator := (right: TValue): integer;
 begin
@@ -318,6 +602,11 @@ begin
   result := TStringValue.Create(right);
 end;
 
+operator := (right: boolean): TValue;
+begin
+  result := TBooleanValue.Create(right);
+end;
+
 //$bookmark arithmetic operators
 
 operator + (left: TValue; right: integer): integer;
@@ -367,6 +656,11 @@ begin
   result := TStringValue(left) = right;
 end;
 
+operator = (left: TValue; right: boolean): boolean;
+begin
+  result := TBooleanValue(left) = right;
+end;
+
 operator = (left: integer; right: TValue): boolean;
 begin
   result := left = TIntegerValue(right);
@@ -380,6 +674,58 @@ end;
 operator = (left: string; right: TValue): boolean;
 begin
   result := left = TStringValue(right);
+end;
+
+operator = (left: boolean; right: TValue): boolean;
+begin
+  result := left = TBooleanValue(right);
+end;
+
+//$bookmark relational
+operator > (left: TValue; right: integer): boolean;
+begin
+  result := TIntegerValue(left).value > right;
+end;
+
+operator > (left: TValue; right: float): boolean;
+begin
+  result := TFloatValue(left).value = right;
+end;
+
+operator > (left: TValue; right: string): boolean;
+begin
+  result := TStringValue(left).value = right;
+end;
+
+operator > (left: TValue; right: boolean): boolean;
+begin
+  result := TBooleanValue(left).value = right;
+end;
+
+operator < (left: TValue; right: integer): boolean;
+begin
+  result := TIntegerValue(left).value > right;
+end;
+
+operator < (left: TValue; right: float): boolean;
+begin
+  result := TFloatValue(left).value = right;
+end;
+
+operator < (left: TValue; right: string): boolean;
+begin
+  result := TStringValue(left).value = right;
+end;
+
+operator < (left: TValue; right: boolean): boolean;
+begin
+  result := TBooleanValue(left).value = right;
+end;
+
+//$bookmark unary operators
+operator not (left: TValue): boolean;
+begin
+  result := not left.IsValid;
 end;
 
 {$endif}

@@ -11,16 +11,27 @@ type
     public
       constructor Create (newValue: ansistring; inStart, inLength: longint);
       function Copy: TValue; override;
-      function DebugString: string; override;
+      function DebugString: ansistring; override;
     private
       start, len: longint;
   end;
 
+type
+  PPattern = ^TPattern;
+  TPattern = record
+    ref: pointer;
+    class operator Finalize(var rec: TPattern);
+  end;
+
 function preg_match(pattern: string; subject: ansistring): boolean; overload;
 function preg_match(pattern: string; subject: ansistring; out matches: TList): boolean; overload;
+function preg_match(constref pattern: TPattern; subject: ansistring): boolean; overload;
+function preg_match(constref pattern: TPattern; subject: ansistring; out matches: TList): boolean; overload;
+
 function preg_match_all(pattern: string; subject: ansistring; out matches: TList): boolean;
 function preg_split(pattern: string; subject: ansistring): TList;
 function preg_replace(pattern: string; replacement: string; subject: ansistring): ansistring;
+function preg_pattern(pattern: string; var compiled: TPattern): boolean;
 
 {$endif}
 
@@ -38,7 +49,7 @@ begin
   result := TMatchValue.Create(value, start, len);
 end;
 
-function TMatchValue.DebugString: string;
+function TMatchValue.DebugString: ansistring;
 begin
   result := value+' '+IntToStr(start)+'/'+IntToStr(len);
 end;
@@ -159,98 +170,179 @@ type
     fullString: ansistring;
   end;
 
+type
+  TPCRERegex = class
+    vectors: PIntArray;
+    vectorSize: cint;
+    vectorCount: cint;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+threadvar
+  SharedRegex: TPCRERegex;
+
+var 
+  pcre_options: cint = PCRE_CASELESS + PCRE_UTF8;
+
+constructor TPCRERegex.Create;
+const
+  MAX_VECTOR_SIZE = 99;
+begin
+  vectorCount := MAX_VECTOR_SIZE;
+  vectorSize := (1 + MAX_VECTOR_SIZE) * 3;
+  vectors := PIntArray(GetMem(sizeof(cint) * vectorSize));
+end;
+
+destructor TPCRERegex.Destroy;
+begin
+  if assigned(vectors) then
+    FreeMem(vectors);
+end;
+
+// https://www.pcre.org/original/doc/html/index.html
 function pcre_compile (pattern: pchar; options: cint; var errptr: pchar; var erroffset: cint; tableptr: PCRETableRef): PCRERef; cdecl; external name 'pcre_compile';
 function pcre_exec (pcre: PCRERef; pcre_extra: PPCREExtraRec; subject: pchar; length: cint; startoffset: cint; options: cint; ovector: PIntArray; ovecsize: cint): cint; cdecl; external name 'pcre_exec';
 function pcre_study(pcre: PCRERef; options: cint; var errptr: pchar): PPCREExtraRec; cdecl; external name 'pcre_study';
-procedure pcre_free (var pcre: PCRERef); cdecl; external name 'pcre_free';
+procedure pcre_free (pcre: PCRERef); cdecl; external name 'pcre_free';
+function pcre_get_substring(subject: pchar; ovector: PIntArray; stringcount: cint; stringnumber: cint; stringptr: ppchar): cint; external name 'pcre_get_substring';
 
-function preg_match_internal(pattern: string; subject: ansistring; findAll: boolean; matches: PList): boolean;
+// https://www.mitchr.me/SS/exampleCode/AUPG/pcre_example.c.html
+
+class operator TPattern.Finalize(var rec: TPattern);
+begin
+  // TODO: crashes!
+  //pcre_free(rec.ref);
+  writeln('TPattern.Finalize');
+end;
+
+function preg_pattern(pattern: string; var compiled: TPattern): boolean;
+var
+  options: cint;
+  err: pchar;
+  errOffset: cint;
+begin
+  if SharedRegex = nil then
+    SharedRegex := TPCRERegex.Create;
+
+  pattern := pattern+chr(0);
+  options := pcre_options;
+  compiled.ref := pcre_compile(@pattern[1], options, err, errOffset, nil);
+
+  result := assigned(compiled.ref);
+end;
+
+function preg_match_internal(pattern: string; compiledPattern: PPattern; subject: ansistring; findAll: boolean; matches: PList): boolean;
 const
   MAX_VECTOR_SIZE = 99;
 var
   ref: PCRERef;
-  vectorSize: UInt32;
-  vectorCount: integer;
-  vectors: PIntArray;
-  options: UInt32;
+  options: cint;
   extraInfo: PPCREExtraRec;
-  matchCount: integer;
+  res: cint;
+  startOffset: longint;
   matchStart: longint;
   matchEnd: longint;
-  startOffset: longint;
-  matchStr: string;
+  matchStr: ansistring;
   err: pchar;
   errOffset: cint;
-  i: integer;
 begin
+  if SharedRegex = nil then
+    SharedRegex := TPCRERegex.Create;
+
   result := false;
   startOffset := 0;
-  pattern := pattern+''+chr(0);
-  subject := subject+''+chr(0);
-  options := PCRE_CASELESS + PCRE_UTF8;
-  ref := pcre_compile(@pattern[1], options, err, errOffset, nil);
-  if ref = nil then
+  pattern := pattern+chr(0);
+  subject := subject+chr(0);
+  options := pcre_options;
+
+  if assigned(compiledPattern) then
     begin
-      result := false;
-      exit;
+      ref := compiledPattern.ref;
+    end
+  else
+    begin
+      ref := pcre_compile(@pattern[1], options, err, errOffset, nil);
+      if ref = nil then
+        begin
+          result := false;
+          exit;
+        end;
     end;
+
   // TODO: what's this good for?
   //extraInfo := pcre_study(ref, 0, err);
   extraInfo := nil;
 
   if assigned(matches) then
     begin
-      vectorCount := MAX_VECTOR_SIZE;
-      vectorSize := (1 + MAX_VECTOR_SIZE) * 3;
-      vectors := PIntArray(GetMem(sizeof(integer) * vectorSize));
-      
       repeat
-        matchCount := pcre_exec(ref, extraInfo, pchar(subject), length(subject), startOffset, 0, vectors, vectorCount);
-        if matchCount > 0 then
+        res := pcre_exec(ref, extraInfo, pchar(subject), length(subject), startOffset, 0, SharedRegex.vectors, SharedRegex.vectorCount);
+        if res > PCRE_ERROR_NOMATCH then
           begin
-            matchStart := vectors[0];
-            matchEnd := vectors[1];
+            // TODO: we can use pcre_get_substring for this but is it better?
+            matchStart := SharedRegex.vectors[0];
+            matchEnd := SharedRegex.vectors[1];
             startOffset := matchEnd;
             matchStr := substr(subject, matchStart, matchEnd - matchStart);
             if matchStr <> '' then
               begin
-                matches.Add(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
+                matches.AddTemp(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
                 result := true;
               end;
             if not findAll then
-              matchCount := 0;
+              res := -1;
           end;
-      until matchCount <= 0;
-
-      FreeMem(vectors);
+      until res < 0;
     end
   else
     begin
-      matchCount := pcre_exec(ref, extraInfo, pchar(subject), length(subject), 0, 0, nil, 0);
-      if matchCount > 0 then
+      res := pcre_exec(ref, extraInfo, pchar(subject), length(subject), startOffset, 0, nil, 0);
+      //case PCRE_ERROR_NOMATCH      : printf("String did not match the pattern\n");        break;
+      //case PCRE_ERROR_NULL         : printf("Something was null\n");                      break;
+      //case PCRE_ERROR_BADOPTION    : printf("A bad option was passed\n");                 break;
+      //case PCRE_ERROR_BADMAGIC     : printf("Magic number bad (compiled re corrupt?)\n"); break;
+      //case PCRE_ERROR_UNKNOWN_NODE : printf("Something kooky in the compiled re\n");      break;
+      //case PCRE_ERROR_NOMEMORY     : printf("Ran out of memory\n");                       break;
+      if res > PCRE_ERROR_NOMATCH then
         result := true;
     end;
+
+  // TODO: crashes??
+  if not assigned(compiledPattern) then
+    //pcre_free(ref);
+    ;
 end;
 
 function preg_match(pattern: string; subject: ansistring): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, subject, false, nil);
+  result := preg_match_internal(pattern, nil, subject, false, nil);
 end;
 
 function preg_match(pattern: string; subject: ansistring; out matches: TList): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, subject, false, @matches);
+  result := preg_match_internal(pattern, nil, subject, false, @matches);
+end;
+
+function preg_match(constref pattern: TPattern; subject: ansistring): boolean;
+begin
+  result := preg_match_internal('', @pattern, subject, false, nil);
+end;
+
+function preg_match(constref pattern: TPattern; subject: ansistring; out matches: TList): boolean;
+begin
+  result := preg_match_internal('',  @pattern, subject, false, @matches);
 end;
 
 function preg_match_all(pattern: string; subject: ansistring; out matches: TList): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, subject, true, @matches);
+  result := preg_match_internal(pattern, nil, subject, true, @matches);
 end;
 
 // https://www.php.net/manual/en/function.preg-split.php
@@ -266,7 +358,7 @@ begin
     exit;
   // TODO: if we have an optional callback we can avoid all the
   // extra allocations
-  if preg_match_internal(pattern, subject, true, @matches) then
+  if preg_match_internal(pattern, nil, subject, true, @matches) then
     begin
       offset := 0;
       for pointer(match) in matches do
@@ -296,7 +388,7 @@ begin
     exit(subject);
   // TODO: if we have an optional callback we can avoid all the
   // extra allocations
-  if preg_match_internal(pattern, subject, false, @matches) then
+  if preg_match_internal(pattern, nil, subject, false, @matches) then
     result := replace(subject, replacement, TMatchValue(matches[0]).start, TMatchValue(matches[0]).len)
   else
     result := subject;

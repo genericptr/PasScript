@@ -12,7 +12,7 @@ end;
 
 procedure ParseCommandLine;
 const
-  AlphaNumericCharSet = ['a'..'z', 'A'..'Z', '1'..'9', '0'];
+  CommandLineChars = ['a'..'z', 'A'..'Z', '1'..'9', '0', '_'];
 var
   i, j: integer;
   param: ansistring;
@@ -40,7 +40,7 @@ begin
               j := flag + 1;
               while j <= length(param) do
                 begin
-                  if param[j] in AlphaNumericCharSet then
+                  if param[j] in CommandLineChars then
                     begin
                       name += param[j];
                       inc(j);
@@ -65,20 +65,28 @@ begin
                         end;
                       // quotes must be termianted
                       if quotes and (param[j] <> '"') then
-                        fatal('flag '+name+' value not termianted with double-quote');
+                        fatal('flag "'+name+'"" value not termianted with double-quote');
                     end
                   else
-                    fatal('invalid arg '+param);
+                    fatal('invalid flag "'+param+'"');
                 end;
               
               // add to argv
-              // TODO: bugs! argv needs to be actually used in unit it was defined
-              argv[name] := value;
+              if value = '' then
+                argv[name] := true
+              else
+                argv[name] := value;
               //writeln('name:',name, ' value:', value);
             end;
         end
+      else if i = 1 then
+        begin
+          // first param is allowed to be a path
+          // TODO: should we have system args using $ prefix?
+          argv['$source'] := value;
+        end
       else
-        fatal('invalid arg '+param);
+        fatal('invalid flag "'+param+'"');
     end;
 end;
 
