@@ -2,20 +2,29 @@
 {$include include/targetos.inc}
 {$macro on}
 
+{$ifdef DARWIN}
+{$linkframework Cocoa}
+{$modeswitch objectivec1}
+{$endif}
+
 unit PasScript;
 interface
 uses
+  {$ifdef DARWIN}
+  MacOSAll, CocoaAll,
+  {$endif}
   CTypes, Math, SysUtils, BaseUnix, Sockets, Scanner, Variants;
 
 {$define inline_operator}
 
 {$define INTERFACE}
+{$include include/Globals.inc}
 {$include include/Math.inc}
 {$include include/Values.inc}
+{$include include/Conversions.inc}
 {$include include/List.inc}
 {$include include/Dictionary.inc}
 {$include include/Regex.inc}
-{$include include/Utils.inc}
 {$include include/ListUtils.inc}
 {$include include/DictUtils.inc}
 {$include include/StrUtils.inc}
@@ -23,6 +32,8 @@ uses
 {$include include/ProcessUtils.inc}
 {$include include/WebUtils.inc}
 {$include include/JSONUtils.inc}
+{$include include/XMLUtils.inc}
+{$include include/Utils.inc}
 {$undef INTERFACE}
 
 var
@@ -35,20 +46,22 @@ var
 
 const
   FLAG_PPS_SRC = 'pps_src';
+  FLAG_PPS_EXEC = 'pps_exec';
 
 procedure InitThread;
 
 implementation
 
 {$define IMPLEMENTATION}
+{$include include/Globals.inc}
 {$include include/Math.inc}
 {$include include/BaseUnix.inc}
 {$include include/PrivateUtils.inc}
 {$include include/Values.inc}
+{$include include/Conversions.inc}
 {$include include/List.inc}
 {$include include/Dictionary.inc}
 {$include include/Regex.inc}
-{$include include/Utils.inc}
 {$include include/ListUtils.inc}
 {$include include/DictUtils.inc}
 {$include include/StrUtils.inc}
@@ -56,22 +69,23 @@ implementation
 {$include include/ProcessUtils.inc}
 {$include include/WebUtils.inc}
 {$include include/JSONUtils.inc}
+{$include include/XMLUtils.inc}
+{$include include/Utils.inc}
 {$undef IMPLEMENTATION}
 
 procedure InitThread;
 begin
   SharedRegex := nil;
-  SharedProcess := nil;
 end;
 
 begin
   {$define CODE}
   {$include include/Math.inc}
   {$include include/Values.inc}
+  {$include include/Conversions.inc}
   {$include include/List.inc}
   {$include include/Dictionary.inc}
   {$include include/Regex.inc}
-  {$include include/Utils.inc}
   {$include include/ListUtils.inc}
   {$include include/DictUtils.inc}
   {$include include/StrUtils.inc}
@@ -79,6 +93,8 @@ begin
   {$include include/ProcessUtils.inc}
   {$include include/WebUtils.inc}
   {$include include/JSONUtils.inc}
+  {$include include/XMLUtils.inc}
+  {$include include/Utils.inc}
   {$undef CODE}
 
   ParseCommandLine;

@@ -15,6 +15,9 @@ type
       procedure SetValue(k0,k1,k2: variant; value: TValue); overload; inline;
       procedure SetValue(k0,k1,k2,k3: variant; value: TValue); overload; inline;
     public
+      list: TList;
+      dict: TDict;
+    public
       property InternalValues[key: variant]: TValue read GetValue write SetValue; default;
 
       function IsArray: boolean; inline;
@@ -24,10 +27,9 @@ type
 
       procedure Show;
       function Str(formatted: boolean = true): ansistring;
+      function MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
 
     private
-      list: TList;
-      dict: TDict;
       root: TValueType;
 
       procedure GetValue(base: TValue; k0: variant; out value: TValue); overload;
@@ -63,7 +65,9 @@ var
 begin
   scanner := TJSONScanner.Create(contents);
   scanner.Parse;
-  
+
+  fatal(scanner.data = nil, 'json_decode failed');
+
   if scanner.data.InheritsFrom(TListValue) then
     begin
       result.list := TListValue(scanner.data).value;
@@ -140,12 +144,7 @@ end;
 function TJSON.Str(formatted: boolean = true): ansistring;
 begin
   if formatted then
-    begin
-      if IsArray then
-        result := list.MakeFormattedString('', [TStringFormatJSON])
-      else
-        result := dict.MakeFormattedString('', [TStringFormatJSON]);
-    end
+    result := MakeFormattedString('', [TStringFormatJSON])
   else
     begin
       if root = TListType then
@@ -153,6 +152,14 @@ begin
       else
         result := dict.Str;
     end;
+end;
+
+function TJSON.MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
+begin
+  if IsArray then
+    result := list.MakeFormattedString(indent, formatting)
+  else
+    result := dict.MakeFormattedString(indent, formatting);
 end;
 
 procedure TJSON.GetValue(base: TValue; k0: variant; out value: TValue);
@@ -382,7 +389,7 @@ begin
           begin
             CheckInvalidKey;
             //writeln('new array');
-            writeln('add ', key, ' -> array');
+            //writeln('add ', key, ' -> array');
             Consume(token);
             // TODO: this doesn't copy but we don't have a copy option for dicts yet
             child := TListValue.Create;
@@ -393,7 +400,7 @@ begin
           begin
             CheckInvalidKey;
             //writeln('new object');
-            writeln('add ', key, ' -> object');
+            //writeln('add ', key, ' -> object');
             Consume(token);
             // TODO: this doesn't copy but we don't have a copy option for dicts yet
             child := TDictValue.Create;
@@ -403,7 +410,7 @@ begin
         kTokenCurlyBracketClosed:
           begin
             // TODO: check if we're open!
-            writeln('close object');
+            //writeln('close object');
             Consume(token);
             break;
           end;
@@ -419,7 +426,7 @@ begin
             else
               begin
                 CheckInvalidKey;
-                writeln('add ', key, ' -> ', pattern);
+                //writeln('add ', key, ' -> ', pattern);
                 dict.value[key] := TValue(pattern);
                 Consume(token);
                 key := '';
@@ -429,8 +436,7 @@ begin
         otherwise
           begin
             CheckInvalidKey;
-            //writeln('got value: ', pattern, ' for ', TokenToStr(token));
-            writeln('add ', key, ' -> ', pattern);
+            //writeln('add ', key, ' -> ', pattern);
             value := ParseValue;
             dict.value[key] := TValue(value);
             key := '';

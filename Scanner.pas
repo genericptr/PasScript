@@ -18,10 +18,18 @@ type
 						kTokenParenthasisClosed,
 						kTokenCurlyBracketOpen,
 						kTokenCurlyBracketClosed,
+						kTokenAngleBracketOpen,
+						kTokenAngleBracketClosed,
 						kTokenEquals,
 						kTokenColon,
 						kTokenComma,
 						kTokenSemicolon,
+						kTokenQuestionMark,
+						kTokenForwardSlash,
+						kTokenExclamationMark,
+						kTokenBackSlash,
+						kTokenAmpersand,
+						kTokenDash,
 						kTokenEOF
 						);
 
@@ -45,14 +53,21 @@ type
 		protected
 			function ReadToken: TToken;
 			procedure ParserError (messageString: string = '');
+
+			procedure  Consume; inline;
 			procedure Consume(t: TToken);
 			function TryConsume(t: TToken): boolean;
-		private
-			procedure SkipLine;
-			procedure SkipSpace;
+			function TryConsume(t: TToken; out s: shortstring): boolean; inline;
+			function TryConsume(t: TToken; out s: ansistring): boolean; inline;
+
 			function ReadWord: ansistring;
 			function ReadChar: char;
 			function ReadNumber: string;
+			
+			function Peek(str: string): boolean;
+		private
+			procedure SkipLine;
+			procedure SkipSpace;
 			procedure AdvancePattern;
 			function Peek (advance: integer = 1): char;
 		private
@@ -96,6 +111,10 @@ begin
 			result := '{';
 		kTokenCurlyBracketClosed:
 			result := '}';
+		kTokenAngleBracketOpen:
+			result := '<';
+		kTokenAngleBracketClosed:
+			result := '>';
 		kTokenEquals:
 			result := '=';
 		kTokenColon:
@@ -103,12 +122,29 @@ begin
 		kTokenComma:
 			result := ',';
 		kTokenSemicolon:
-			result := ':';
+			result := ';';
+		kTokenQuestionMark:
+			result := '?';
+		kTokenExclamationMark:
+			result := '!';
+		kTokenForwardSlash:
+			result := '/';
+		kTokenBackSlash:
+			result := '\';
+		kTokenAmpersand:
+			result := '&';
+		kTokenDash:
+			result := '-';
 		kTokenEOF:
 			result := 'EOF';
 		otherwise
 			raise exception.create('invalid token');
 	end;
+end;
+
+procedure TScanner.Consume;
+begin
+	Consume(token);
 end;
 
 procedure TScanner.Consume(t: TToken);
@@ -117,6 +153,18 @@ begin
 	  ReadToken
 	else
 		ParserError('Got "'+TokenToStr(token)+'", expected "'+TokenToStr(t)+'"');
+end;
+
+function TScanner.TryConsume(t: TToken; out s: shortstring): boolean; inline;
+begin
+	s := pattern;
+	result := TryConsume(t);
+end;
+
+function TScanner.TryConsume(t: TToken; out s: ansistring): boolean;
+begin
+	s := pattern;
+	result := TryConsume(t);
 end;
 
 function TScanner.TryConsume(t: TToken): boolean;
@@ -151,6 +199,16 @@ begin
 		result := #0;
 end;
 
+function TScanner.Peek(str: string): boolean;
+var
+	i: integer;
+begin
+	result := true;
+	for i := 1 to length(str) do
+		if contents[currentIndex + (i - 1)] <> str[i] then
+			exit(false);
+end;
+
 function TScanner.ReadChar: char;
 begin
 	currentIndex += 1;
@@ -183,25 +241,9 @@ begin
 	pattern := '';
 	token := kTokenInteger;
 
-	//if (c = '-') and (Peek in [TCharSetInteger]) then
-	//	begin
-	//		negative := true;
-	//		pattern += c;
-	//		ReadChar;
-	//	end
-	//else if c in [TCharSetInteger] then
-	//	begin
-	//		pattern += c;
-	//		ReadChar;
-	//	end
-	//else
-	//	ParserError('invalid number');
-
 	if c = '-' then
 		begin
 			negative := true;
-			//pattern += c;
-			//ReadChar;
 			AdvancePattern;
 		end;
 
@@ -221,8 +263,6 @@ begin
 				end
 			else if c = '.' then
 				token := kTokenRealNumber;
-			//pattern += c;
-			//ReadChar;
 			AdvancePattern;
 		end;
 
@@ -232,7 +272,7 @@ end;
 procedure TScanner.ParserError(messageString: string = '');
 begin
 	writeln('Error at ', fileInfo.line, ':', fileInfo.column, ': ', messageString);
-	halt;
+	halt(1);
 end;
 
 function TScanner.ReadToken: TToken;
@@ -246,11 +286,19 @@ begin
 			//writeln('  ', currentIndex, ':', c);
 			case c of
 				'-':
-					if Peek in [TCharSetInteger] then
-						begin
-							ReadNumber;
-							goto TokenRead;
-						end;
+					begin
+						if Peek in [TCharSetInteger] then
+							begin
+								ReadNumber;
+								goto TokenRead;
+							end
+						else
+							begin
+								token := kTokenDash;
+								ReadChar;
+								goto TokenRead;
+							end;
+					end;
 				TCharSetInteger:
 					begin
 						ReadNumber;
@@ -298,6 +346,18 @@ begin
 						ReadChar;
 						goto TokenRead;
 					end;
+				'<':
+					begin
+						token := kTokenAngleBracketOpen;
+						ReadChar;
+						goto TokenRead;
+					end;
+				'>':
+					begin
+						token := kTokenAngleBracketClosed;
+						ReadChar;
+						goto TokenRead;
+					end;
 				'=':
 					begin
 						token := kTokenEquals;
@@ -319,6 +379,18 @@ begin
 				';':
 					begin
 						token := kTokenSemicolon;
+						ReadChar;
+						goto TokenRead;
+					end;
+				'?':
+					begin
+						token := kTokenQuestionMark;
+						ReadChar;
+						goto TokenRead;
+					end;
+				'!':
+					begin
+						token := kTokenExclamationMark;
 						ReadChar;
 						goto TokenRead;
 					end;
@@ -376,6 +448,12 @@ begin
 											end;
 									end;
 								continue;
+							end
+						else
+							begin
+								ReadChar;
+								token := kTokenForwardSlash;
+								goto TokenRead;
 							end;
 					end;
 				//'#':

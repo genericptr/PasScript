@@ -12,8 +12,8 @@ type
 
 type
   TCharSet = set of char;
+
 const
-  // TODO: tabs?
   WhiteSpaceCharacters = [chr(32), chr(12), chr(10)];
 
 function Explode(input: ansistring; delimiter: string): TList; 
@@ -24,6 +24,7 @@ function Strpos(subject: ansistring; search: ansistring; offset: longint = 0): l
 function Replace(search: LongString; replacement: LongString; subject: LongString; replaceAll: boolean = true): LongString; overload;
 function Replace(subject: LongString; replacement: LongString; start: LongStringIndex; len: LongStringIndex): LongString; overload;
 function StrCopy(subject: LongString; offset: LongStringIndex; count: LongStringIndex): LongString;
+function StrCopyAt(subject: LongString; startPos, endPos: LongStringIndex): LongString;
 function StrCaseCmp(left, right: string): boolean;
 
 function HasPrefix(subject: ansistring; prefix: string): boolean;
@@ -33,8 +34,18 @@ function Trim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansis
 function LTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
 function RTrim(subject: ansistring; mask: TCharSet = WhiteSpaceCharacters): ansistring;
 
+function Wrap(subject: ansistring; str: string = '"'): ansistring; inline;
+function AddSlashes(subject: LongString): LongString; inline;
+
+// Aliases
+function str_replace(search: LongString; replacement: LongString; subject: LongString): LongString;
+// TODO: substr_replace
+// https://www.php.net/manual/en/function.substr-replace.php
+function is_numeric(value: ansistring): boolean; inline;
+
 type
   TLongStringHelpers = type helper for LongString
+    procedure Show; inline;
     function Length: LongStringIndex; inline;
     function High: LongStringIndex; inline;
     function Explode(delimiter: string): TList; inline;
@@ -51,6 +62,7 @@ type
 
 type
   TShortStringHelpers = type helper for ShortString
+    procedure Show; inline;
     function Length: ShortStringIndex; inline;
     function High: ShortStringIndex; inline;
     function Explode(delimiter: string): TList; inline;
@@ -63,11 +75,11 @@ type
     function ToBool: boolean; inline;
   end;
 
-// implicit string conversions
+{ Implicit String Conversions }
 operator := (right: longint): string;
 operator := (right: float): string;
 
-// string conversions
+{ String/Numeric conversions }
 function ToStr(value: longint): string; overload; inline;
 function ToStr(value: double): string; overload; inline;
 function ToStr(value: boolean): string; overload; inline;
@@ -96,6 +108,31 @@ type
 {$endif}
 
 {$ifdef IMPLEMENTATION}
+
+//$bookmark -
+//$bookmark PRIVATE FUNCTIONS
+//$bookmark -
+
+type
+  TPrivateLongStringHelpers = type helper for LongString
+    procedure AppendBytes(buffer: pointer; len: integer);
+  end;
+
+function StrAppendBytes(var subject: LongString; buffer: pointer; len: integer): LongString;
+begin
+  subject.Expand(len);
+  Move(buffer^, subject[length(subject) - len + 1], len);
+  result := subject;
+end;
+
+procedure TPrivateLongStringHelpers.AppendBytes(buffer: pointer; len: integer);
+begin
+  StrAppendBytes(self, buffer, len);
+end;
+
+//$bookmark -
+//$bookmark OPERATORS
+//$bookmark -
 
 operator := (right: integer): string;
 begin
@@ -173,8 +210,13 @@ end;
 
 
 //$bookmark -
-//$bookmark STRING HELPERS
+//$bookmark LONG STRING HELPERS
 //$bookmark -
+
+procedure TLongStringHelpers.Show;
+begin
+  writeln(self);
+end;
 
 function TLongStringHelpers.Length: LongStringIndex;
 begin
@@ -232,6 +274,15 @@ end;
 function TLongStringHelpers.ToBool: boolean;
 begin
   result := PasScript.ToBool(self);
+end;
+
+//$bookmark -
+//$bookmark SHORT STRING HELPERS
+//$bookmark -
+
+procedure TShortStringHelpers.Show;
+begin
+  writeln(self);
 end;
 
 function TShortStringHelpers.Length: ShortStringIndex;
@@ -358,6 +409,10 @@ begin
   //    exit(false);
 end;
 
+function Wrap(subject: ansistring; str: string = '"'): ansistring;
+begin
+  result := str+subject+str;
+end;
 
 // https://www.php.net/manual/en/function.substr.php
 generic function substr_internal<S, U>(subject: S; const start: U; len: U; offset: integer): S;
@@ -366,6 +421,8 @@ var
   max: integer;
 begin
   result := '';
+  if len = 0 then
+    exit;
   max := subject.high + offset;
   if len = 0 then
     len := max;
@@ -449,6 +506,23 @@ begin
   Move(subject[offset], result[1], count);
 end;
 
+function StrCopyAt(subject: LongString; startPos, endPos: LongStringIndex): LongString;
+var
+  count, max: LongStringIndex;
+begin
+  SetLength(result, count);
+  max := length(subject) - startPos;
+  if endPos = -1 then
+    count := max
+  else
+    begin
+      count := endPos - startPos;
+      if count > max then
+        count := max;
+    end;
+  Move(subject[startPos], result[1], count);
+end;
+
 function StrCaseCmp(left, right: string): boolean;
 var
   i: integer;
@@ -512,6 +586,32 @@ begin
 end;
 
 
+// alias for PHP
+// https://www.php.net/manual/en/function.str-replace.php
+function str_replace(search: LongString; replacement: LongString; subject: LongString): LongString;
+begin
+  result := Replace(search, replacement, subject, true);
+end;
+
+// TODO: make a custom function for this
+function is_numeric(value: ansistring): boolean;
+var
+  i: integer;
+  f: float;
+begin
+  if TryStrToInt(value, i) then
+    result := true
+  else if TryStrToFloat(value, f) then
+    result := true
+  else
+    result := false;
+end;
+
+function AddSlashes(subject: LongString): LongString;
+begin
+  result := Replace('"', '\"', subject, true);
+end;
+
 // TODO: needs short string version
 function Replace(subject: LongString; replacement: LongString; start: LongStringIndex; len: LongStringIndex): LongString;
 begin
@@ -547,6 +647,8 @@ var
   part: ansistring;
   dstr: string;
 begin
+  result.Clear;
+
   if length(input) = 0 then
     exit;
 

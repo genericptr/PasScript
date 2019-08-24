@@ -1,30 +1,26 @@
 {$ifdef INTERFACE}
 
-procedure Fatal(condition: boolean; msg: string); overload;
-procedure Fatal(msg: string); overload;
+procedure print_r (constref list: TList);
+procedure print_r (constref dict: TDict);
+procedure print_r (constref json: TJSON);
 
-procedure Halt(code: integer = 0; msg: string = '');
 {$endif}
 
 {$ifdef IMPLEMENTATION}
-procedure Fatal(condition: boolean; msg: string);
+
+procedure print_r (constref list: TList);
 begin
-  if condition then
-    Fatal(msg);
+  writeln(list.MakeFormattedString('', [TStringFormatDebug]));
 end;
 
-procedure Fatal(msg: string);
+procedure print_r (constref dict: TDict);
 begin
-  writeln('FATAL: '+msg);
-  //system.halt(code);
-  raise Exception.Create(msg);
+  writeln(dict.MakeFormattedString('', [TStringFormatDebug]));
 end;
 
-procedure Halt(code: integer = 0; msg: string = '');
+procedure print_r (constref json: TJSON);
 begin
-  if msg <> '' then
-    writeln(msg);
-  system.halt(code);
+  writeln(json.MakeFormattedString('', [TStringFormatDebug]));
 end;
 
 {$endif}

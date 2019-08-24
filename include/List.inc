@@ -4,20 +4,20 @@
 // https://bugs.freepascal.org/view.php?id=35821
 {$varpropsetter on}
 type
+  TListIndex = longint;
   PList = ^TList;
   TList = record
     private type
-      TArrayIndex = longint;
       TInternalArray = array of TValue;
       TRefCountedValueArray = specialize TRefCountedArray<TValue>;
       TEnumerator = record
         private
           list: TInternalArray;
           currentValue: TValue;
-          currentIndex: TArrayIndex;
-          lastElement: TArrayIndex;
+          currentIndex: TListIndex;
+          lastElement: TListIndex;
         public
-          constructor Create(source: TInternalArray; _lastElement: TArrayIndex); 
+          constructor Create(source: TInternalArray; _lastElement: TListIndex); 
           function MoveNext: boolean;
           property Current: TValue read currentValue;
       end;
@@ -40,6 +40,8 @@ type
       procedure SetValue(k0,k1,k2: variant; value: TValue); overload; inline;
       procedure SetValue(k0,k1,k2,k3: variant; value: TValue); overload; inline;
     public
+      property Values[index: variant]: TValue read GetValue write SetValue; default;
+    public
       constructor Create(_capacity: integer);
 
       { Methods }
@@ -57,13 +59,14 @@ type
       procedure Clear;
 
       { Searching }
+      // TODO: replace with variant
       function IndexOf(value: integer): integer; overload;
       function IndexOf(value: float): integer; overload;
       function IndexOf(value: string): integer; overload;
-      procedure Sort(comparator: TComparator = nil; context: pointer = nil);
+      function IndexOf(value: ansistring): integer; overload;
+      function Sort(comparator: TComparator = nil; context: pointer = nil): TList;
 
       { Element Access }
-      property Values[index: variant]: TValue read GetValue write SetValue; default;
       function Tail: TValue; inline;
 
       { Introspection }
@@ -76,7 +79,11 @@ type
       function MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
 
     public
-      class operator + (constref left: TList; right: TValue): TList; overload;
+      class operator + (constref left: TList; right: TValue): TList;
+
+      class operator in (constref left: integer; constref right: TList): boolean; overload;
+      class operator in (constref left: string; constref right: TList): boolean; overload;
+      class operator in (constref left: ansistring; constref right: TList): boolean; overload;
     private
       class operator := (right: array of const): TList;
       class operator Initialize(var list: TList);
@@ -93,11 +100,11 @@ type
       function GetValueInternal(index: integer): TValue; inline;
       procedure SetValueInternal(index: integer; value: TValue); inline;
 
-      function GetCurrentIndex: TArrayIndex; inline;
-      procedure SetCurrentIndex(newValue: TArrayIndex); inline;
-      property CurrentIndex: TArrayIndex read GetCurrentIndex write SetCurrentIndex;
+      function GetCurrentIndex: TListIndex; inline;
+      procedure SetCurrentIndex(newValue: TListIndex); inline;
+      property CurrentIndex: TListIndex read GetCurrentIndex write SetCurrentIndex;
 
-      procedure QuickSort (var x: TInternalArray; first, last: TArrayIndex; comparator: TComparator; context: pointer);
+      procedure QuickSort (var x: TInternalArray; first, last: TListIndex; comparator: TComparator; context: pointer);
       procedure Expand(newSize: integer);
       procedure GrowToFit(newSize: integer);
   end;
@@ -111,7 +118,7 @@ type
 
 function TList.TListArray.Copy: TListArray;
 var
-  i: TArrayIndex;
+  i: TListIndex;
 begin
   result := TListArray.Create(GetLength);
 
@@ -124,6 +131,21 @@ end;
 
 //$bookmark OPERATORS
 
+class operator TList.in (constref left: integer; constref right: TList): boolean;
+begin
+  result := right.IndexOf(left) <> -1;
+end;
+
+class operator TList.in (constref left: string; constref right: TList): boolean;
+begin
+  result := right.IndexOf(left) <> -1;
+end;
+
+class operator TList.in (constref left: ansistring; constref right: TList): boolean;
+begin
+  result := right.IndexOf(left) <> -1;
+end;
+
 class operator TList.+ (constref left: TList; right: TValue): TList;
 begin
   left.Add(right);
@@ -135,7 +157,6 @@ var
   i: integer;
 begin
   result.GrowToFit(length(right));
-  //result.Clear;
   // https://wiki.lazarus.freepascal.org/TVarRec
   for i := 0 to system.high(right) do
     begin
@@ -160,7 +181,7 @@ end;
 
 //$bookmark ENUMERATOR
 
-constructor TList.TEnumerator.Create(source: TInternalArray; _lastElement: TArrayIndex);
+constructor TList.TEnumerator.Create(source: TInternalArray; _lastElement: TListIndex);
 begin
   list := source;
   lastElement := _lastElement;
@@ -180,9 +201,9 @@ begin
     result := false;
 end;
 
-procedure TList.QuickSort (var x: TInternalArray; first, last: TArrayIndex; comparator: TComparator; context: pointer);
+procedure TList.QuickSort (var x: TInternalArray; first, last: TListIndex; comparator: TComparator; context: pointer);
 var
-  pivot,j,i: TArrayIndex;
+  pivot,j,i: TListIndex;
   temp: TValue;
 begin
   if (first < last) then
@@ -216,7 +237,7 @@ begin
   result := left.Compare(right);
 end;
 
-procedure TList.Sort(comparator: TComparator = nil; context: pointer = nil);
+function TList.Sort(comparator: TComparator = nil; context: pointer = nil): TList;
 begin
   if Count < 2 then
     exit;
@@ -224,7 +245,8 @@ begin
   if comparator = nil then
     comparator := @DefaultListComparator;
 
-  QuickSort(m_array.values, 0, High, comparator, context);
+  result := self;
+  QuickSort(result.m_array.values, 0, result.High, comparator, context);
 end;
 
 function TList.Str: ansistring;
@@ -245,16 +267,24 @@ end;
 function TList.MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
 var
   i: integer;
+  prefix, suffix: string;
 begin
   result := '['+#10;
   for i := 0 to high do
     begin
       if not assigned(values[i]) then
         fatal('trying to print invalid index '+i+'/'+ToStr(High));
+      prefix := indent;
+      suffix := ',';
+      if TStringFormatDebug in formatting then
+        begin
+          prefix := indent+'  '+tostr(i)+': ';
+          suffix := '';
+        end;
       if i = high then
-        result += indent+'  '+values[i].MakeFormattedString(indent+'  ', formatting)+#10
+        result += prefix+'  '+values[i].MakeFormattedString(indent+'  ', formatting)+#10
       else
-        result += indent+'  '+values[i].MakeFormattedString(indent+'  ', formatting)+','+#10;
+        result += prefix+'  '+values[i].MakeFormattedString(indent+'  ', formatting)+suffix+#10;
     end;
   result += indent+']';
 end;
@@ -262,16 +292,16 @@ end;
 
 procedure TList.Show;
 begin
-  writeln(Str);
+  print_r(self);
 end;
 
-function TList.GetCurrentIndex: TArrayIndex;
+function TList.GetCurrentIndex: TListIndex;
 begin
   fatal(m_array = nil, 'TList internal array nil');
   result := m_array.currentIndex;
 end;
 
-procedure TList.SetCurrentIndex(newValue: TArrayIndex);
+procedure TList.SetCurrentIndex(newValue: TListIndex);
 begin
   m_array.currentIndex := newValue;
 end;
@@ -293,7 +323,7 @@ end;
 
 procedure TList.Clear;
 var
-  i: TArrayIndex;
+  i: TListIndex;
 begin
   // TODO: shrink?
   for i := 0 to High do
@@ -357,31 +387,41 @@ end;
 
 function TList.IndexOf(value: integer): integer;
 var
-  i: TArrayIndex;
+  i: TListIndex;
 begin
   result := -1;
   for i := 0 to High do
-    if m_array[i] = value then
+    if m_array[i].Compare(value) = kOrderedSame then
       exit(i);
 end;
 
 function TList.IndexOf(value: float): integer;
 var
-  i: TArrayIndex;
+  i: TListIndex;
 begin
   result := -1;
   for i := 0 to High do
-    if m_array[i] = value then
+    if m_array[i].Compare(value) = kOrderedSame then
       exit(i);
 end;
 
 function TList.IndexOf(value: string): integer;
 var
-  i: TArrayIndex;
+  i: TListIndex;
 begin
   result := -1;
   for i := 0 to High do
-    if m_array[i] = value then
+    if m_array[i].Compare(value) = kOrderedSame then
+      exit(i);
+end;
+
+function TList.IndexOf(value: ansistring): integer; overload;
+var
+  i: TListIndex;
+begin
+  result := -1;
+  for i := 0 to High do
+    if m_array[i].Compare(value) = kOrderedSame then
       exit(i);
 end;
 
@@ -500,7 +540,7 @@ end;
 
 procedure TList.SetValue(k0: variant; value: TValue);
 begin
-  GetValue(nil, k0, value);
+  SetValue(nil, k0, value);
 end;
 
 procedure TList.SetValue(k0,k1: variant; value: TValue);

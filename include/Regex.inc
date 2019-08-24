@@ -20,6 +20,7 @@ type
   PPattern = ^TPattern;
   TPattern = record
     ref: pointer;
+    extraInfo: pointer;
     class operator Finalize(var rec: TPattern);
   end;
 
@@ -32,6 +33,7 @@ function preg_match_all(pattern: string; subject: ansistring; out matches: TList
 function preg_split(pattern: string; subject: ansistring): TList;
 function preg_replace(pattern: string; replacement: string; subject: ansistring): ansistring;
 function preg_pattern(pattern: string; var compiled: TPattern): boolean;
+function preg_pattern(pattern: string): TPattern;
 
 {$endif}
 
@@ -42,6 +44,7 @@ begin
   value := newValue;
   start := inStart;
   len := inLength;
+  typ := TStringType;
 end;
 
 function TMatchValue.Copy: TValue;
@@ -205,6 +208,7 @@ function pcre_compile (pattern: pchar; options: cint; var errptr: pchar; var err
 function pcre_exec (pcre: PCRERef; pcre_extra: PPCREExtraRec; subject: pchar; length: cint; startoffset: cint; options: cint; ovector: PIntArray; ovecsize: cint): cint; cdecl; external name 'pcre_exec';
 function pcre_study(pcre: PCRERef; options: cint; var errptr: pchar): PPCREExtraRec; cdecl; external name 'pcre_study';
 procedure pcre_free (pcre: PCRERef); cdecl; external name 'pcre_free';
+procedure pcre_free_study (extraInfo: PPCREExtraRec); cdecl; external name 'pcre_free_study';
 function pcre_get_substring(subject: pchar; ovector: PIntArray; stringcount: cint; stringnumber: cint; stringptr: ppchar): cint; external name 'pcre_get_substring';
 
 // https://www.mitchr.me/SS/exampleCode/AUPG/pcre_example.c.html
@@ -213,7 +217,7 @@ class operator TPattern.Finalize(var rec: TPattern);
 begin
   // TODO: crashes!
   //pcre_free(rec.ref);
-  writeln('TPattern.Finalize');
+  //pcre_free_study(rec.extraInfo);
 end;
 
 function preg_pattern(pattern: string; var compiled: TPattern): boolean;
@@ -230,21 +234,32 @@ begin
   compiled.ref := pcre_compile(@pattern[1], options, err, errOffset, nil);
 
   result := assigned(compiled.ref);
+
+  // https://www.pcre.org/original/doc/html/pcre_study.html
+  if result then
+    compiled.extraInfo := pcre_study(compiled.ref, 0, err);
 end;
 
-function preg_match_internal(pattern: string; compiledPattern: PPattern; subject: ansistring; findAll: boolean; matches: PList): boolean;
+function preg_pattern(pattern: string): TPattern;
+begin
+  if not preg_pattern(pattern, result) then
+    fatal('pattern '+wrap(pattern)+' failed to compile');
+end;
+
+function preg_match_internal(pattern: string; compiledPattern: PPattern; subject: ansistring; extraInfo: PPCREExtraRec; findAll: boolean; matches: PList): boolean;
 const
   MAX_VECTOR_SIZE = 99;
 var
   ref: PCRERef;
   options: cint;
-  extraInfo: PPCREExtraRec;
   res: cint;
   startOffset: longint;
   matchStart: longint;
   matchEnd: longint;
   matchStr: ansistring;
+  matchCount: integer;
   err: pchar;
+  i: integer;
   errOffset: cint;
 begin
   if SharedRegex = nil then
@@ -270,30 +285,30 @@ begin
         end;
     end;
 
-  // TODO: what's this good for?
-  //extraInfo := pcre_study(ref, 0, err);
-  extraInfo := nil;
-
   if assigned(matches) then
     begin
       repeat
-        res := pcre_exec(ref, extraInfo, pchar(subject), length(subject), startOffset, 0, SharedRegex.vectors, SharedRegex.vectorCount);
-        if res > PCRE_ERROR_NOMATCH then
+        matchCount := pcre_exec(ref, extraInfo, pchar(subject), length(subject), startOffset, 0, SharedRegex.vectors, SharedRegex.vectorCount);
+        if matchCount > PCRE_ERROR_NOMATCH then
           begin
-            // TODO: we can use pcre_get_substring for this but is it better?
-            matchStart := SharedRegex.vectors[0];
-            matchEnd := SharedRegex.vectors[1];
-            startOffset := matchEnd;
-            matchStr := substr(subject, matchStart, matchEnd - matchStart);
-            if matchStr <> '' then
-              begin
-                matches.AddTemp(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
-                result := true;
-              end;
+            i := 0;
+            //writeln('matchCount:',matchCount);
+            repeat
+              // TODO: we can use pcre_get_substring for this but is it better?
+              matchStart := SharedRegex.vectors[i + 0];
+              matchEnd := SharedRegex.vectors[i + 1];
+              startOffset := matchEnd;
+              matchStr := substr(subject, matchStart, matchEnd - matchStart);
+              matches.AddTemp(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
+              i += 2;
+              dec(matchCount);
+              result := true;
+            until matchCount = 0;
+            // done searching
             if not findAll then
-              res := -1;
+              matchCount := -1;
           end;
-      until res < 0;
+      until matchCount < 0;
     end
   else
     begin
@@ -318,31 +333,31 @@ function preg_match(pattern: string; subject: ansistring): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, nil, subject, false, nil);
+  result := preg_match_internal(pattern, nil, subject, nil, false, nil);
 end;
 
 function preg_match(pattern: string; subject: ansistring; out matches: TList): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, nil, subject, false, @matches);
+  result := preg_match_internal(pattern, nil, subject, nil, false, @matches);
 end;
 
 function preg_match(constref pattern: TPattern; subject: ansistring): boolean;
 begin
-  result := preg_match_internal('', @pattern, subject, false, nil);
+  result := preg_match_internal('', @pattern, subject, pattern.extraInfo, false, nil);
 end;
 
 function preg_match(constref pattern: TPattern; subject: ansistring; out matches: TList): boolean;
 begin
-  result := preg_match_internal('',  @pattern, subject, false, @matches);
+  result := preg_match_internal('',  @pattern, subject, pattern.extraInfo, false, @matches);
 end;
 
 function preg_match_all(pattern: string; subject: ansistring; out matches: TList): boolean;
 begin
   if pattern = '' then
     exit(false);
-  result := preg_match_internal(pattern, nil, subject, true, @matches);
+  result := preg_match_internal(pattern, nil, subject, nil, true, @matches);
 end;
 
 // https://www.php.net/manual/en/function.preg-split.php
@@ -358,7 +373,7 @@ begin
     exit;
   // TODO: if we have an optional callback we can avoid all the
   // extra allocations
-  if preg_match_internal(pattern, nil, subject, true, @matches) then
+  if preg_match_internal(pattern, nil, subject, nil, true, @matches) then
     begin
       offset := 0;
       for pointer(match) in matches do
@@ -388,7 +403,7 @@ begin
     exit(subject);
   // TODO: if we have an optional callback we can avoid all the
   // extra allocations
-  if preg_match_internal(pattern, nil, subject, false, @matches) then
+  if preg_match_internal(pattern, nil, subject, nil, false, @matches) then
     result := replace(subject, replacement, TMatchValue(matches[0]).start, TMatchValue(matches[0]).len)
   else
     result := subject;

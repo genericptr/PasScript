@@ -38,6 +38,7 @@ type
 
 operator := (right: array of const): TValue;
 operator := (right: TList): TValue; {$i inline_operator}
+operator := (right: TValue): TList; {$i inline_operator}
 operator explicit(right: TList): TValue; {$i inline_operator}
 
 {$endif}
@@ -71,6 +72,12 @@ end;
 operator :=(right: TList): TValue;
 begin
   result := TListValue.Create(right);
+end;
+
+operator := (right: TValue): TList;
+begin
+  fatal(right.typ <> TListType, 'can''t convert '+right.ClassName+' to list');
+  result := TListValue(right).value;
 end;
 
 operator := (right: array of const): TValue;

@@ -13,6 +13,7 @@ end;
 procedure ParseCommandLine;
 const
   CommandLineChars = ['a'..'z', 'A'..'Z', '1'..'9', '0', '_'];
+  QuoteChars = ['''', '"'];
 var
   i, j: integer;
   param: ansistring;
@@ -35,7 +36,7 @@ begin
           else
             flag := 1;
 
-          if flag > -1 then
+          if flag <> -1 then
             begin
               j := flag + 1;
               while j <= length(param) do
@@ -50,7 +51,7 @@ begin
                       value := '';
                       inc(j);
                       // allow optional quote
-                      if param[j] = '"' then
+                      if param[j] in QuoteChars then
                         begin
                           quotes := true;
                           inc(j);
@@ -64,7 +65,7 @@ begin
                           inc(j);
                         end;
                       // quotes must be termianted
-                      if quotes and (param[j] <> '"') then
+                      if quotes and not (param[j] in QuoteChars) then
                         fatal('flag "'+name+'"" value not termianted with double-quote');
                     end
                   else
@@ -76,14 +77,14 @@ begin
                 argv[name] := true
               else
                 argv[name] := value;
-              //writeln('name:',name, ' value:', value);
-            end;
+            end
+          else
+            fatal('invalid param #'+string(i));
         end
       else if i = 1 then
         begin
           // first param is allowed to be a path
-          // TODO: should we have system args using $ prefix?
-          argv['$source'] := value;
+          argv[FLAG_PPS_SRC] := param;
         end
       else
         fatal('invalid flag "'+param+'"');

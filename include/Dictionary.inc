@@ -8,6 +8,7 @@ type
   TDictionaryEntry = record
     key: TDictionaryKey;
     value: TValue;
+    function IsSet: boolean; inline;
   end;
   PDictionaryEntry = ^TDictionaryEntry;
   TDictionary = record
@@ -17,6 +18,7 @@ type
         capacity: integer;
         hashesChanged: boolean;
         valueCount: integer;
+        sorted: boolean;
         function Copy: TDictionaryEntryArray;
       end;
       TEnumerator = record
@@ -29,12 +31,21 @@ type
           function GetCurrent: PDictionaryEntry;
           property Current: PDictionaryEntry read GetCurrent;
       end;
-      TComparator = function (left, right: pointer; context: pointer): TComparatorResult;
     private
-      // TODO: do we need get safe now? I think the overloaded property will fix this
-      function GetValueSafe (key: TDictionaryKey): TValue; inline; overload;
-      function GetValue (key: TDictionaryKey): TValue; inline; overload;
-      procedure SetValue (key: TDictionaryKey; value: TValue); overload;
+      // TODO: using broken overloads until overloaded array props are added
+      // https://bugs.freepascal.org/view.php?id=35772
+      // https://bugs.freepascal.org/view.php?id=35809
+      function GetValue(k0: variant): TValue; overload; inline;
+      function GetValue(k0,k1: variant): TValue; overload; inline;
+      function GetValue(k0,k1,k2: variant): TValue; overload; inline;
+      function GetValue(k0,k1,k2,k3: variant): TValue; overload; inline;
+
+      procedure SetValue(k0: variant; value: TValue); overload; inline;
+      procedure SetValue(k0,k1: variant; value: TValue); overload; inline;
+      procedure SetValue(k0,k1,k2: variant; value: TValue); overload; inline;
+      procedure SetValue(k0,k1,k2,k3: variant; value: TValue); overload; inline;
+    public
+      property EntryAccess[key: variant]: TValue read GetValue write SetValue; default;
     public
       { Setting/Removing }
       procedure Remove (key: TDictionaryKey);    
@@ -54,30 +65,31 @@ type
       function MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
       procedure Show;
 
-      procedure SortKeys(comparator: TComparator = nil; context: pointer = nil);
-      procedure SortValues(comparator: TComparator = nil; context: pointer = nil);
-
-      property EntryAccess[key: TDictionaryKey]: TValue read GetValueSafe write SetValue; default;
     private
       class operator := (right: array of TDictionaryEntry): TDictionary;
-      class operator Finalize(var dict: TDictionary); 
-      class operator Initialize(var dict: TDictionary);
-      class operator AddRef(var dict: TDictionary);
-      class operator Copy(constref src: TDictionary; var dest: TDictionary);
+      class operator := (right: array of const): TDictionary;
+      class operator Finalize (var dict: TDictionary); 
+      class operator Initialize (var dict: TDictionary);
+      class operator AddRef (var dict: TDictionary);
+      class operator Copy (constref src: TDictionary; var dest: TDictionary);
     private
       entries: TDictionaryEntryArray;
 
+      function GetValueInternal (key: TDictionaryKey): TValue; inline;
+      function GetValueAtIndex (index: TArrayIndex): TValue; inline;
+      procedure SetValueAtIndex (index: TArrayIndex; key: TDictionaryKey; value: TValue);
+      procedure SetValueInternal (key: TDictionaryKey; value: TValue);
+      procedure GetValue (base: TValue; k0: variant; out value: TValue);
+      procedure SetValue (base: TValue; k0: variant; value: TValue);
+
+      function GetKey (index: TArrayIndex): TDictionaryKey; inline;
       function Capacity: integer; inline;
       function Hash (key: TDictionaryKey): integer;
       function IsSet (index: TArrayIndex): boolean; inline;
-      function GetKey (index: TArrayIndex): TDictionaryKey; inline;
-      function GetValue (index: TArrayIndex): TValue; inline;
       function KeyOfValue (value: TValue): TDictionaryKey;
       function CompareValues (a, b: TValue): boolean; inline;
-      procedure SetValue (index: TArrayIndex; key: TDictionaryKey; value: TValue);
-      procedure Rehash (elements: integer);
+      procedure Rehash (newSize: integer);
       procedure ReleaseValue (index: TArrayIndex);
-      procedure QuickSort (src: TDictionaryEntryArray; first, last: TArrayIndex; comparator: TComparator; context: pointer);
     private
       class var UnassignedValue: TUnassignedValue;
   end;
@@ -89,6 +101,14 @@ type
 {$endif}
 
 {$ifdef IMPLEMENTATION}
+
+var
+  EmptyDictEntry: TDictionaryEntry = (key: ''; value: nil);
+
+function TDictionaryEntry.IsSet : boolean;
+begin
+  result := assigned(value);
+end;
 
 function TDictionary.TDictionaryEntryArray.Copy: TDictionaryEntryArray;
 var
@@ -108,6 +128,7 @@ begin
 
   result.capacity := self.capacity;
   result.hashesChanged := self.hashesChanged;
+  result.sorted := self.sorted;
   result.valueCount := self.valueCount;
 end;
 
@@ -184,103 +205,128 @@ end;
 
 procedure TDictionary.Show;
 begin
-  writeln(Str);
+  print_r(self);
 end;
 
-procedure TDictionary.QuickSort (src: TDictionaryEntryArray; first, last: TArrayIndex; comparator: TComparator; context: pointer);
+procedure TDictionary.GetValue(base: TValue; k0: variant; out value: TValue);
+begin  
+  case VarType(k0) of
+    varShortInt, varSmallint, varInteger:
+      begin
+        if base = nil then
+          Fatal('can not use integer for indexing dictionaries')
+        else
+          value := TListValue(base).value.GetValueInternal(integer(k0));
+      end;
+    varString:
+      begin
+        if base = nil then
+          value := GetValueInternal(string(k0))
+        else
+          value := TDictValue(base).value.GetValueInternal(string(k0));
+      end;
+    otherwise
+      fatal('invalid index type for dictionary');
+  end;
+
+  if not assigned(value) then
+    value := UnassignedValue;
+end;
+
+function TDictionary.GetValue(k0: variant): TValue;
+begin
+  GetValue(nil, k0, result);
+end;
+
+function TDictionary.GetValue(k0,k1: variant): TValue;
 var
-  pivot,j,i: TArrayIndex;
-  temp: PDictionaryEntry;
+  next: TValue;
 begin
-  if (first < last) then
-    begin
-      pivot:=first;
-      i:=first;
-      j:=last;
-      while(i<j)do
-        begin
-          while(comparator(src.refs[i], src.refs[pivot], context).LessThanOrEqualTo and (i<last)) do
-            inc(i);
-          while(comparator(src.refs[j], src.refs[pivot], context).GreaterThan) do
-            dec(j);
-          if i<j then
-            begin
-              temp:=src.refs[i];
-              src.refs[i]:=src.refs[j];
-              src.refs[j]:=temp;
-            end;
-        end;
-      temp:=src.refs[pivot];
-      src.refs[pivot]:=src.refs[j];
-      src.refs[j]:=temp;
-      QuickSort(src,first,j-1,comparator,context);
-      QuickSort(src,j+1,last,comparator,context);
-    end;
+  GetValue(nil, k0, next);
+  GetValue(next, k1, result);
 end;
 
-function DefaultKeyComparator(left, right: pointer; context: pointer): TComparatorResult;
+function TDictionary.GetValue(k0,k1,k2: variant): TValue;
 var
-  r: integer;
+  next: TValue;
 begin
-  if (TPair(left).key = '') and (TPair(right).key = '') then
-    exit(kOrderedSame)
-  else if (TPair(left).key <> '') and (TPair(right).key = '') then
-    exit(kOrderedAscending)
-  else if (TPair(left).key = '') and (TPair(right).key <> '') then
-    exit(kOrderedDescending);
-
-  r := CompareText(TPair(left).key, TPair(right).key);
-  if r > 0 then
-    result := kOrderedAscending
-  else if r < 0 then
-    result := kOrderedDescending
-  else
-    result := kOrderedSame;
-
-  writeln(TPair(left).key,' <-> ', TPair(right).key, ': ', result);
+  GetValue(nil, k0, next);
+  GetValue(next, k1, next);
+  GetValue(next, k2, result);
 end;
 
-function DefaultValueComparator(left, right: pointer; context: pointer): TComparatorResult;
+function TDictionary.GetValue(k0,k1,k2,k3: variant): TValue;
+var
+  next: TValue;
 begin
-  result := PValue(left).Compare(PValue(right)^);
+  GetValue(nil, k0, next);
+  GetValue(next, k1, next);
+  GetValue(next, k2, next);
+  GetValue(next, k3, result);
 end;
 
-procedure TDictionary.SortKeys(comparator: TComparator = nil; context: pointer = nil);
+procedure TDictionary.SetValue(base: TValue; k0: variant; value: TValue);
 begin
-  if comparator = nil then
-    comparator := @DefaultKeyComparator;
-
-  QuickSort(entries, 0, entries.GetLength - 1, comparator, context);
+  case VarType(k0) of
+    varShortInt, varSmallint, varInteger:
+      begin
+        if base = nil then
+          Fatal('can not use integer for indexing dictionaries')
+        else
+          TListValue(base).value.SetValueInternal(integer(k0), value);
+      end;
+    varString:
+      begin
+        if base = nil then
+          SetValueInternal(string(k0), value)
+        else
+          TDictValue(base).value.SetValueInternal(string(k0), value);
+      end;
+    otherwise
+      fatal('invalid index type for list');
+  end;
 end;
 
-procedure TDictionary.SortValues(comparator: TComparator = nil; context: pointer = nil);
+procedure TDictionary.SetValue(k0: variant; value: TValue);
 begin
-  if comparator = nil then
-    comparator := @DefaultValueComparator;
+  SetValue(nil, k0, value);
+end;
 
-  QuickSort(entries, 0, entries.GetLength - 1, comparator, context);
+procedure TDictionary.SetValue(k0,k1: variant; value: TValue);
+var
+  next: TValue;
+begin
+  GetValue(nil, k0, next);
+  SetValue(next, k1, value);
+end;
+
+procedure TDictionary.SetValue(k0,k1,k2: variant; value: TValue);
+var
+  next: TValue;
+begin
+  GetValue(nil, k0, next);
+  GetValue(next, k1, next);
+  SetValue(next, k2, value);
+end;
+
+
+procedure TDictionary.SetValue(k0,k1,k2,k3: variant; value: TValue);
+var
+  next: TValue;
+begin
+  GetValue(nil, k0, next);
+  GetValue(next, k1, next);
+  GetValue(next, k2, next);
+  SetValue(next, k3, value);
 end;
 
 function TDictionary.GetValue (key: TDictionaryKey; out value: TValue): boolean;
 begin
-  value := GetValue(key);
+  value := GetValueInternal(key);
   result := assigned(value);
 end;
 
-function TDictionary.GetValue (key: TDictionaryKey): TValue;
-begin
-  result := GetValue(Hash(key));
-end;
-
-function TDictionary.GetValueSafe (key: TDictionaryKey): TValue;
-begin
-  result := GetValue(Hash(key));
-  if not assigned(result) then
-    result := UnassignedValue;
-end;
-
-procedure TDictionary.SetValue (key: TDictionaryKey; value: TValue);
- // http://stackoverflow.com/questions/1100311/what-is-the-ideal-growth-rate-for-a-dynamically-allocated-array
+procedure TDictionary.SetValueInternal (key: TDictionaryKey; value: TValue);
 const
   kGrowSize = 2;
 var
@@ -290,7 +336,7 @@ begin
 
   // available location, set value
   if not IsSet(index) then
-    SetValue(index, key, value)
+    SetValueAtIndex(index, key, value)
   else
     begin
       // there is a collision because the key is not the same
@@ -298,10 +344,11 @@ begin
       if GetKey(index) <> key then
         begin
           Rehash(Trunc(Capacity * kGrowSize));
-          SetValue(key, value);
+          SetValueInternal(key, value);
+          //writeln(index, ' <> ', key, ' grow to ', Capacity);
         end
       else 
-        SetValue(index, key, value); // replace value since the key is the same
+        SetValueAtIndex(index, key, value); // replace value since the key is the same
     end;
 end;
 
@@ -310,7 +357,7 @@ begin
   result := entries.capacity;
 end;
 
-procedure TDictionary.SetValue (index: TArrayIndex; key: TDictionaryKey; value: TValue);
+procedure TDictionary.SetValueAtIndex (index: TArrayIndex; key: TDictionaryKey; value: TValue);
 begin
   ReleaseValue(index);
   entries.refs[index].key := key;
@@ -318,9 +365,20 @@ begin
   entries.hashesChanged := true;
 end;
 
-function TDictionary.GetValue (index: TArrayIndex): TValue;
+function TDictionary.GetValueAtIndex (index: TArrayIndex): TValue;
 begin
   result := entries.refs[index].value;
+end;
+
+function TDictionary.GetValueInternal (key: TDictionaryKey): TValue;
+var
+  index: TArrayIndex;
+begin
+  index := Hash(key);
+  if entries.refs[index].IsSet and (entries.refs[index].key = key) then
+    result := entries.refs[index].value
+  else
+    result := nil;
 end;
 
 function TDictionary.GetKey (index: TArrayIndex): TDictionaryKey;
@@ -345,7 +403,7 @@ end;
 
 function TDictionary.IsSet (index: integer): boolean;
 begin
-  result := assigned(entries.refs[index].value);
+  result := entries.refs[index].IsSet;
 end;
 
 function TDictionary.ContainsValue (value: TValue): boolean;
@@ -354,8 +412,11 @@ begin
 end;
 
 function TDictionary.ContainsKey (key: TDictionaryKey): boolean;
+var
+  index: TArrayIndex;
 begin
-  result := assigned(GetValue(key));
+  index := Hash(key);
+  result := entries.refs[index].IsSet and (entries.refs[index].key = key);
 end;
 
 function TDictionary.Count: TArrayIndex;
@@ -380,7 +441,7 @@ var
 begin
   for i := 0 to Capacity - 1 do
     if IsSet(i) then
-      result.Add(GetValue(i));
+      result.Add(GetValueAtIndex(i));
 end;
 
 function TDictionary.Keys: TList;
@@ -414,7 +475,7 @@ begin
   FillChar(entries.values[0], Capacity * sizeof(TDictionaryEntry), 0);
 end;
 
-procedure TDictionary.Rehash (elements: TArrayIndex);
+procedure TDictionary.Rehash (newSize: TArrayIndex);
 var
   i: TArrayIndex;
   oldElemenents: TArrayIndex = 0;
@@ -427,15 +488,16 @@ begin
   if oldElemenents > 0 then
     temp := entries.values;
 
-  entries.SetLength(elements);
-  FillChar(entries.values[0], elements * sizeof(TDictionaryEntry), 0);
+  entries.SetLength(newSize);
+  FillChar(entries.values[0], newSize * sizeof(TDictionaryEntry), 0);
 
   for i := 0 to oldElemenents - 1 do
-    if assigned(temp[i].value) then
-      SetValue(temp[i].key, temp[i].value);
+    if temp[i].IsSet then
+      SetValueAtIndex(Hash(temp[i].key), temp[i].key, temp[i].value);
   
-  entries.capacity := elements;
+  entries.capacity := newSize;
   entries.hashesChanged := true;
+  entries.sorted := false;
 end;
 
 function TDictionary.Hash (key: TDictionaryKey): TArrayIndex;
@@ -491,6 +553,66 @@ begin
         begin
           Clear;
           FreeAndNil(entries);
+        end;
+    end;
+end;
+
+//class operator TDictionary.:= (right: TValue): TDictionary;
+//var
+//  i: integer;
+//  key: TDictionaryKey;
+//begin
+//  writeln(':= from list');
+//  Fatal(right.typ <> TListType, 'can''t assign new dictionary with value');
+    
+//  for i := 0 to TListValue(right).value.high do
+//    begin
+//      if i mod 2 = 0 then
+//        key := right[i]
+//      else
+//        begin
+//          writeln(key, ' : ', right[i].str);
+//          result[key] := right[i].Copy;
+//        end;
+//    end;
+//end;
+
+class operator TDictionary.:= (right: array of const): TDictionary;
+var
+  i: integer;
+  key: TDictionaryKey;
+begin
+  result.Rehash(length(right));
+  // https://wiki.lazarus.freepascal.org/TVarRec
+  for i := 0 to system.high(right) do
+    begin
+      if i mod 2 = 0 then
+        begin
+          if right[i].vtype = vtString then
+            key := right[i].vstring^
+          else if right[i].vtype = vtAnsiString then
+            key := ansistring(right[i].vansistring)
+          else if right[i].vtype = vtChar then
+            key := right[i].vchar
+          else
+            fatal('key type '+IntToStr(right[i].vtype)+' is invalid.');
+        end
+      else
+        begin
+          case right[i].vtype of
+            vtInteger:
+              result[key] := right[i].vinteger;
+            vtExtended:
+              result[key] := right[i].vextended^;
+            vtString:
+              result[key] := right[i].vstring^;
+            vtAnsiString:
+              result[key] := ansistring(right[i].vansistring);
+            vtChar:
+              result[key] := right[i].vchar;
+            otherwise
+              fatal('variable argument value type '+IntToStr(right[i].vtype)+' is invalid.');
+          end;
         end;
     end;
 end;
