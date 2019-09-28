@@ -19,9 +19,12 @@ type
       constructor Create(name: TXMLNodeName; text: TXMLNodeContents = ''); overload;
       function Str: ansistring; override;
       function FullName: TXMLNodeName; inline;
+      function Sibling: TXMLNode; inline;
       function Add(name: string; text: TXMLNodeContents = ''): TXMLNode;
       function Add(name: string; text: TXMLNodeContents; attributes: array of string): TXMLNode;
       procedure AddComment(contents: TXMLNodeContents);
+      function FindAll(name: string): TList;
+      function Copy: TValue; override;
     private
       function FindChildAtIndex(name: string; index: integer): TXMLNode;
       function FindChild (name: string): TXMLNode;
@@ -37,9 +40,9 @@ type
       name: TXMLNodeName;
       prefix: TXMLNodeName;
       attributes: TDict;
-    private
       parent: TXMLNode;
-      sibling: TXMLNode;
+      index: integer;
+    private
       children: TList;
       comment: boolean;
       function MakeAttributeString: ansistring;
@@ -75,7 +78,9 @@ type
       class operator Copy(constref src: TXMLDocument; var dest: TXMLDocument);
   end;
 
-function xml_decode (contents: ansistring): TXMLDocument;
+// TODO: xml_encode - just call toString on the TXMLDocument root node
+function xml_decode (contents: LongString): TXMLDocument;
+function xml_decode_file (path: LongString): TXMLDocument; inline;
 
 function DecodeHTMLEntity (name: string): string;
 function EncodeHTMLEntity (name: string): string;
@@ -274,6 +279,11 @@ begin
   result := MakeFormatedString('');
 end;
 
+function TXMLNode.Sibling: TXMLNode;
+begin
+  result := parent[index + 1];
+end;
+
 function TXMLNode.FullName: TXMLNodeName;
 begin
   if prefix = '' then
@@ -288,7 +298,9 @@ var
 begin
   fatal(self.text <> '', 'node <'+self.name+'> has text contents sp can not add children.');
   child := TXMLNode.Create(name, text);
-  children.AddTemp(child);
+  child.parent := self;
+  child.index := children.Count;
+  children.AddWithoutCopy(child);
   result := child;
 end;
 
@@ -296,6 +308,7 @@ function TXMLNode.Add(name: string; text: TXMLNodeContents; attributes: array of
 var
   i: integer;
 begin
+  // TODO: set 
   result := Add(name, text);
   for i := 0 to high(attributes) div 2 do
     result.attributes[attributes[i * 2]] := attributes[(i * 2) + 1];
@@ -304,7 +317,28 @@ end;
 procedure TXMLNode.AddComment(contents: TXMLNodeContents);
 begin
   // TODO: not sure how to add these without breaking indexing
-  //children.AddTemp(TXMLCommentNode.Create(contents));
+  //children.AddWithoutCopy(TXMLCommentNode.Create(contents));
+end;
+
+function TXMLNode.FindAll(name: string): TList;
+var
+  child: TXMLNode;
+begin
+  result.Clear;
+  for TValue(child) in children do
+    if child.name = name then
+      result.AddWithoutCopy(child);
+end;
+
+function TXMLNode.Copy: TValue;
+begin
+  result := TXMLNode.Create;
+  TXMLNode(result).text := self.text;
+  TXMLNode(result).name := self.name;
+  TXMLNode(result).prefix := self.prefix;
+  TXMLNode(result).attributes := self.attributes;
+  TXMLNode(result).parent := self.parent;
+  TXMLNode(result).index := self.index;
 end;
 
 function TXMLNode.FindChild (name: string): TXMLNode;
@@ -342,7 +376,8 @@ end;
 procedure TXMLNode.AddChild(node: TXMLNode);
 begin
   node.parent := self;
-  children.AddTemp(node);
+  node.index := children.Count;
+  children.AddWithoutCopy(node);
 end;
 
 function TXMLCommentNode.MakeFormatedString (indent: string): ansistring;
@@ -381,6 +416,11 @@ begin
   scanner.Parse;
   result.root := scanner.root;
   scanner.Free;
+end;
+
+function xml_decode_file (path: LongString): TXMLDocument;
+begin
+  result := xml_decode(file_get_contents(path));
 end;
 
 function TXMLScanner.ParseAttribute: ansistring;
@@ -561,6 +601,26 @@ begin
       end
     else
       ParserError('XML prolog name must be "xml", got "'+name+'"');
+
+  {
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <!DOCTYPE note SYSTEM "Note.dtd">
+  }
+  // parse DTD
+  if TryConsume(kTokenExclamationMark) then
+    if TryConsume(kTokenID, name) and (StrCaseCmp(name, 'doctype')) then
+      begin
+        Consume(kTokenID);
+        Consume(kTokenID);
+        //writeln('got DTD');
+        Consume(kTokenStringDoubleQuote);
+        //writeln('got attribute: ', wrap(pattern));
+        Consume(kTokenStringDoubleQuote);
+        //writeln('done DTD');
+        //writeln('==============================');
+        Consume(kTokenAngleBracketClosed);
+        Consume(kTokenAngleBracketOpen);
+      end;
 
   ParseTag(root);
 end;

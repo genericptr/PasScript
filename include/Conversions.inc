@@ -1,12 +1,14 @@
 {$ifdef INTERFACE}
 
-// assignment
+// type-casts
 operator explicit (right: Variant): TValue; {$i inline_operator}
 
 operator explicit (source: TValue): integer;
 operator explicit (source: TValue): string;
 operator explicit (source: TValue): float;
 operator explicit (source: TValue): boolean;
+
+// assignment
 
 operator := (right: TValue): integer; {$i inline_operator}
 operator := (right: TValue): float; {$i inline_operator}
@@ -75,7 +77,6 @@ operator not (left: TValue): boolean;
 
 //$bookmark assignment operators
 
-//  TValueType = (TIntegerType, TFloatType, TStringType, TBoolType, TListType, TDictType);
 operator explicit (source: TValue): integer;
 begin
   case source.typ of

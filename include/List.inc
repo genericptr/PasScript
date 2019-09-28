@@ -26,6 +26,7 @@ type
         function Copy: TListArray;
       end;
       TComparator = function (left, right: TValue; context: pointer): TComparatorResult;
+      TComparator2 = function (left, right: TValue; context: pointer): TComparatorResult is nested;
     private
       // TODO: using broken overloads until overloaded array props are added
       // https://bugs.freepascal.org/view.php?id=35772
@@ -64,7 +65,8 @@ type
       function IndexOf(value: float): integer; overload;
       function IndexOf(value: string): integer; overload;
       function IndexOf(value: ansistring): integer; overload;
-      function Sort(comparator: TComparator = nil; context: pointer = nil): TList;
+      function Sort(comparator: TComparator = nil; context: pointer = nil): TList; overload;
+      function Sort(comparator: TComparator2; context: pointer = nil): TList; overload;
 
       { Element Access }
       function Tail: TValue; inline;
@@ -94,7 +96,7 @@ type
       m_array: TListArray;
 
       { Internal Member Access }
-      procedure AddTemp(value: TValue);
+      procedure AddWithoutCopy(value: TValue);
       procedure GetValue(base: TValue; k0: variant; out value: TValue);
       procedure SetValue(base: TValue; k0: variant; value: TValue);
       function GetValueInternal(index: integer): TValue; inline;
@@ -105,6 +107,7 @@ type
       property CurrentIndex: TListIndex read GetCurrentIndex write SetCurrentIndex;
 
       procedure QuickSort (var x: TInternalArray; first, last: TListIndex; comparator: TComparator; context: pointer);
+      procedure QuickSort2 (var x: TInternalArray; first, last: TListIndex; comparator: TComparator2; context: pointer);
       procedure Expand(newSize: integer);
       procedure GrowToFit(newSize: integer);
   end;
@@ -232,9 +235,48 @@ begin
     end;
 end;
 
+procedure TList.QuickSort2 (var x: TInternalArray; first, last: TListIndex; comparator: TComparator2; context: pointer);
+var
+  pivot,j,i: TListIndex;
+  temp: TValue;
+begin
+  if (first < last) then
+    begin
+      pivot:=first;
+      i:=first;
+      j:=last;
+      while(i<j)do
+        begin
+          while(comparator(x[i], x[pivot], context).LessThanOrEqualTo and (i<last)) do
+            inc(i);
+          while(comparator(x[j], x[pivot], context).GreaterThan) do
+            dec(j);
+          if i<j then
+            begin
+              temp:=x[i];
+              x[i]:=x[j];
+              x[j]:=temp;
+            end;
+        end;
+      temp:=x[pivot];
+      x[pivot]:=x[j];
+      x[j]:=temp;
+      QuickSort2(x,first,j-1,comparator,context);
+      QuickSort2(x,j+1,last,comparator,context);
+    end;
+end;
+
 function DefaultListComparator(left, right: TValue; context: pointer): TComparatorResult;
 begin
   result := left.Compare(right);
+end;
+
+function TList.Sort(comparator: TComparator2; context: pointer = nil): TList;
+begin
+  if Count < 2 then
+    exit;
+  result := self;
+  QuickSort2(result.m_array.values, 0, result.High, comparator, context);
 end;
 
 function TList.Sort(comparator: TComparator = nil; context: pointer = nil): TList;
@@ -334,7 +376,7 @@ begin
   currentIndex := 0;
 end;
 
-procedure TList.AddTemp(value: TValue);
+procedure TList.AddWithoutCopy(value: TValue);
 begin
   Fatal(value = nil, 'adding nil value to list');
   GrowToFit(Count + 1);
@@ -356,27 +398,27 @@ end;
 
 procedure TList.Add(value: integer);
 begin
-  AddTemp(TValue(value));
+  AddWithoutCopy(TValue(value));
 end;
 
 procedure TList.Add(value: float);
 begin
-  AddTemp(TValue(value));
+  AddWithoutCopy(TValue(value));
 end;
 
 procedure TList.Add(value: string);
 begin
-  AddTemp(TValue(value));
+  AddWithoutCopy(TValue(value));
 end;
 
 procedure TList.Add(value: ansistring);
 begin
-  AddTemp(TValue(value));
+  AddWithoutCopy(TValue(value));
 end;
 
 procedure TList.Add(value: boolean);
 begin
-  AddTemp(TValue(value));
+  AddWithoutCopy(TValue(value));
 end;
 
 procedure TList.Remove(index: integer);
@@ -459,11 +501,18 @@ end;
 
 procedure TList.SetValueInternal(index: integer; value: TValue);
 begin
-  m_array[index] := TValue.Create;
+  m_array[index] := value{TValue.Create};
 end;
 
 procedure TList.GetValue(base: TValue; k0: variant; out value: TValue);
 begin
+  // trying to index into an invalid list
+  if assigned(base) and (base.typ = TUnassignedType) then
+    begin
+      value := base;
+      exit;
+    end;
+
   case VarType(k0) of
     varShortInt, varSmallint, varInteger:
       begin
@@ -477,7 +526,7 @@ begin
         if base = nil then
           Fatal('can not use strings for indexing lists')
         else
-          value := TDictValue(base).value.GetValue(string(k0));
+          value := TDictValue(base).value.GetValueInternal(string(k0));
       end;
     otherwise
       fatal('invalid index type for list');

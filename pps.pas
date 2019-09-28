@@ -4,7 +4,6 @@ program pps;
 uses
   PasScript, SysUtils;
 
-// TODO: make these options:
 const
   fpc_version = '3.3.1';
   fpc_arch = 'ppcx64';
@@ -59,6 +58,42 @@ begin
   result := root;
 end;
 
+function CompareVersionNumbers(left, right: TValue; context: pointer): TComparatorResult;
+var
+  i: integer;
+  v1, v2: TList;
+begin
+  preg_match('(\d+)\.(\d+)\.(\d+)', left, v1);
+  preg_match('(\d+)\.(\d+)\.(\d+)', right, v2);
+  for i := 1 to 3 do
+    begin
+      if integer(v1[i]) > integer(v2[i]) then
+        begin
+          result := kOrderedDescending;
+          break;
+        end;
+      if integer(v1[i]) < integer(v2[i]) then
+        begin
+          result := kOrderedAscending;
+          break;
+        end;
+      result := kOrderedSame;
+    end;
+end;
+
+function GetLatestFPCVersion: string;
+var
+  files, versions: TList;
+  name: string;
+begin
+  files := scandir('/usr/local/lib/fpc');
+  for name in files do
+    if preg_match('\d+\.\d+\.\d+', name) then
+      versions += name;
+  versions := versions.Sort(@CompareVersionNumbers);
+  result := versions[0];
+end;
+
 var
   i: integer;
   source: string;
@@ -90,12 +125,17 @@ begin
           // get compiler path
           compiler := argv[flag_compiler];
           if not file_exists(compiler) then
-            fpc := fpc_path+'/'+fpc_version+'/'+arch
+            begin
+              version := argv[flag_compiler];
+              if version = 'latest' then
+                version := GetLatestFPCVersion;
+              fpc := fpc_path+'/'+version+'/'+arch
+            end
           else
             fpc := compiler;
           
           //writeln('arch:',arch);
-          //writeln('compiler:',compiler);
+          //writeln('version:',version);
           //writeln('fpc:',fpc);
           //writeln('source:',source);
           //argv.show;

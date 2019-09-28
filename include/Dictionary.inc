@@ -59,7 +59,8 @@ type
       function Count: integer;
       
       { Querying }
-      function ContainsKey (key: TDictionaryKey): boolean;
+      function ContainsKey (key: TDictionaryKey): boolean; overload;
+      function ContainsKey (inKeys: array of TDictionaryKey): boolean; overload;
       function ContainsValue (value: TValue): boolean;
       function Str: ansistring;
       function MakeFormattedString(indent: string = ''; formatting: TStringFormatting = []): ansistring;
@@ -210,6 +211,15 @@ end;
 
 procedure TDictionary.GetValue(base: TValue; k0: variant; out value: TValue);
 begin  
+  
+  // trying to index into an invalid dictionary
+  if assigned(base) and (base.typ = TUnassignedType) then
+    begin
+      //fatal('trying to index into an invalid dictionary from key '+k0);
+      value := base;
+      exit;
+    end;
+
   case VarType(k0) of
     varShortInt, varSmallint, varInteger:
       begin
@@ -332,6 +342,7 @@ const
 var
   index: TArrayIndex;
 begin
+  Assert(entries <> nil, 'dictionary entries are nil');
   index := Hash(key);
 
   // available location, set value
@@ -359,6 +370,7 @@ end;
 
 procedure TDictionary.SetValueAtIndex (index: TArrayIndex; key: TDictionaryKey; value: TValue);
 begin
+  Assert(entries <> nil, 'dictionary entries are nil');
   ReleaseValue(index);
   entries.refs[index].key := key;
   entries.refs[index].value := value;
@@ -367,6 +379,7 @@ end;
 
 function TDictionary.GetValueAtIndex (index: TArrayIndex): TValue;
 begin
+  Assert(entries <> nil, 'dictionary entries are nil');
   result := entries.refs[index].value;
 end;
 
@@ -374,6 +387,7 @@ function TDictionary.GetValueInternal (key: TDictionaryKey): TValue;
 var
   index: TArrayIndex;
 begin
+  Assert(entries <> nil, 'dictionary entries are nil');
   index := Hash(key);
   if entries.refs[index].IsSet and (entries.refs[index].key = key) then
     result := entries.refs[index].value
@@ -383,6 +397,7 @@ end;
 
 function TDictionary.GetKey (index: TArrayIndex): TDictionaryKey;
 begin
+  Assert(entries <> nil, 'dictionary entries are nil');
   result := entries.refs[index].key;
 end;
 
@@ -417,6 +432,41 @@ var
 begin
   index := Hash(key);
   result := entries.refs[index].IsSet and (entries.refs[index].key = key);
+end;
+
+function TDictionary.ContainsKey (inKeys: array of TDictionaryKey): boolean;
+var
+  index: TArrayIndex;
+  parent: TDictValue;
+  key: TDictionaryKey;
+  i: integer;
+begin
+  parent := nil;
+  for i := 0 to high(inKeys) - 1 do
+    begin
+      key := inKeys[i];
+      index := Hash(key);
+      if parent = nil then
+        begin
+          if (entries.refs[index].IsSet and (entries.refs[index].key = key) and (entries.refs[index].value.typ = TDictType)) then
+            parent := TDictValue(entries.refs[index].value)
+          else
+            exit(false);
+        end
+      else
+        begin
+          if parent.value.entries.refs[index].IsSet and (parent.value.entries.refs[index].key = key) and (parent.value.entries.refs[index].value.typ = TDictType) then
+            parent := TDictValue(parent.value.entries.refs[index].value)
+          else
+            exit(false);
+        end;
+    end;
+  key := inKeys[high(inKeys)];
+  index := Hash(key);
+  if parent <> nil then
+    result := (parent.value.entries.refs[index].IsSet) and (parent.value.entries.refs[index].key = key)
+  else
+    result := (entries.refs[index].IsSet) and (entries.refs[index].key = key);
 end;
 
 function TDictionary.Count: TArrayIndex;

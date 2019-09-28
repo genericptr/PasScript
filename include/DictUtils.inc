@@ -11,6 +11,7 @@ type
 type
   TDictValue = class (TValue)
     private
+      function GetValue(key: string): TValue; override;
       function GetValue(index: integer): TValue; override;
       procedure SetValue(index: integer; newValue: TValue); override;
     public
@@ -18,6 +19,7 @@ type
       constructor Create (constref newValue: TDictionary); overload;
       constructor Create; overload;
       function Str: ansistring; override;
+      procedure Show; override;
       function MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring; override;
       function Copy: TValue; override;
   end;
@@ -55,6 +57,11 @@ begin
   result := value.Str;
 end;
 
+procedure TDictValue.Show;
+begin
+  value.Show;
+end;
+
 function TDictValue.MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring;
 begin
   result := value.MakeFormattedString(indent, formatting);
@@ -68,6 +75,14 @@ end;
 function TDictValue.GetValue(index: integer): TValue;
 begin
   result := value[index];
+end;
+
+function TDictValue.GetValue(key: string): TValue;
+begin
+  result := value[key];
+  Show;
+  writeln('got: ',result.str);
+  fatal('index into dict with '+wrap(key));
 end;
 
 procedure TDictValue.SetValue(index: integer; newValue: TValue);

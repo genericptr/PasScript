@@ -51,7 +51,7 @@ operator explicit(right: TList): TValue; {$i inline_operator}
 
 procedure TListValueHelper.Add(value: variant);
 begin
-  TListValue(self).value.AddTemp(TValue(value));
+  TListValue(self).value.AddWithoutCopy(TValue(value));
 end;
 
 procedure TListValueHelper.Remove(index: integer);

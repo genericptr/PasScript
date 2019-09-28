@@ -1,6 +1,7 @@
 {$i settings}
 {$include include/targetos.inc}
 {$macro on}
+{$assertions on}
 
 {$ifdef DARWIN}
 {$linkframework Cocoa}
@@ -13,7 +14,7 @@ uses
   {$ifdef DARWIN}
   MacOSAll, CocoaAll,
   {$endif}
-  CTypes, Math, SysUtils, BaseUnix, Sockets, Scanner, Variants;
+  CTypes, Math, SysUtils, Classes, BaseUnix, Sockets, Scanner, Variants;
 
 {$define inline_operator}
 
@@ -33,6 +34,7 @@ uses
 {$include include/WebUtils.inc}
 {$include include/JSONUtils.inc}
 {$include include/XMLUtils.inc}
+{$include include/PListUtils.inc}
 {$include include/Utils.inc}
 {$undef INTERFACE}
 
@@ -70,6 +72,7 @@ implementation
 {$include include/WebUtils.inc}
 {$include include/JSONUtils.inc}
 {$include include/XMLUtils.inc}
+{$include include/PListUtils.inc}
 {$include include/Utils.inc}
 {$undef IMPLEMENTATION}
 
@@ -94,6 +97,7 @@ begin
   {$include include/WebUtils.inc}
   {$include include/JSONUtils.inc}
   {$include include/XMLUtils.inc}
+  {$include include/PListUtils.inc}
   {$include include/Utils.inc}
   {$undef CODE}
 

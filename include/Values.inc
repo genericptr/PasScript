@@ -33,7 +33,7 @@ type
   TStringFormatting = set of TStringFormat;
 
 type
-  TValueType = (TIntegerType, TFloatType, TStringType, TBoolType, TListType, TDictType);
+  TValueType = (TIntegerType, TFloatType, TStringType, TBoolType, TListType, TDictType, TUnassignedType);
   PValue = ^TValue;
   TValue = class
     // TODO: make this part of the type data set
@@ -42,7 +42,8 @@ type
     private
       typ: TValueType;
     private
-      function GetValue(index: integer): TValue; virtual;
+      function GetValue(key: string): TValue; virtual; overload;
+      function GetValue(index: integer): TValue; virtual; overload;
       procedure SetValue(index: integer; newValue: TValue); virtual;
     public
       function Copy: TValue; virtual;
@@ -51,7 +52,7 @@ type
       function MakeFormattedString(indent: string; formatting: TStringFormatting = []): ansistring; virtual;
       function IsValid: boolean; virtual;
       function Compare(other: TValue): TOrdered; virtual;
-      procedure Show;
+      procedure Show; virtual;
       property Subscript[index: integer]: TValue read GetValue write SetValue; default;
   end;
   TIntegerValue = class (TValue)
@@ -105,7 +106,9 @@ type
   end;
   TUnassignedValue = class (TValue)
     public
+      constructor Create;
       function Copy: TValue; override;
+      function Str: ansistring; override;
   end;
 
 // TODO: allows enabling constref in setters
@@ -228,12 +231,21 @@ end;
 
 //$bookmark UNASSIGNED VALUE
 
+constructor TUnassignedValue.Create;
+begin
+  typ := TUnassignedType;
+end;
+
 function TUnassignedValue.Copy: TValue;
 begin
   fatal('unassigned values can not be copied');
   result := nil;
 end;
 
+function TUnassignedValue.Str: ansistring;
+begin
+  result := '<unassigned>';
+end;
 
 //$bookmark INTEGER VALUE
 
@@ -449,7 +461,12 @@ end;
 
 function TValue.GetValue(index: integer): TValue;
 begin
-  result := nil;
+  result := TDictionary.UnassignedValue;
+end;
+
+function TValue.GetValue(key: string): TValue;
+begin
+  result := TDictionary.UnassignedValue;
 end;
 
 procedure TValue.SetValue(index: integer; newValue: TValue);

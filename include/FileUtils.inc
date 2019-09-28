@@ -75,14 +75,22 @@ function file_exists(path: ansistring): boolean;
 function file_parts(path: ansistring): TFileParts;
 function basename(path: ansistring; extension: boolean = true): ansistring;
 function dirname(path: ansistring): ansistring;
+
 procedure unlink(path: ansistring);
-procedure mkdir(path: ansistring);
+function mkdir(path: ansistring): boolean;
+function copyfile(source: ansistring; dest: ansistring): boolean;
+function rename(source: ansistring; dest: ansistring): boolean; inline;
 
 function getcwd: ansistring; inline;
 procedure chdir(dir: ansistring); inline;
+function tmpfile: ansistring;
+function tmpdir: ansistring;
 
 { Mac Utilities }
 function ExpandTilde(str: ansistring): ansistring;
+
+{ Path Utilities }
+function MakePath (parts: array of const): ansistring;
 
 //$bookmark DATE & TIME 
 
@@ -93,11 +101,17 @@ function TimeSinceNow: longint;
 type
   TLongStringFileHelpers = type helper for LongString
     function ExpandTilde: ansistring;
+    function FileExists: boolean;
+    function AddComponent(component: LongString): LongString;
+    function AddExtension(extension: ShortString): LongString;
   end;
 
 type
   TShortStringFileHelpers = type helper for ShortString
     function ExpandTilde: string;
+    function FileExists: boolean;
+    function AddComponent(component: ShortString): ShortString;
+    function AddExtension(extension: ShortString): ShortString;
   end;
 
 {$endif}
@@ -176,9 +190,63 @@ begin
   result := PasScript.ExpandTilde(self);
 end;
 
+function TLongStringFileHelpers.FileExists: boolean;
+begin
+  result := file_exists(self);
+end;
+
+function TLongStringFileHelpers.AddComponent(component: LongString): LongString;
+begin
+  result := self+'/'+component;
+end;
+
+function TLongStringFileHelpers.AddExtension(extension: ShortString): LongString;
+begin
+  result := self+'.'+extension;
+end;
+
 function TShortStringFileHelpers.ExpandTilde: string;
 begin
   result := PasScript.ExpandTilde(self);
+end;
+
+function TShortStringFileHelpers.FileExists: boolean;
+begin
+  result := file_exists(self);
+end;
+
+function TShortStringFileHelpers.AddComponent(component: ShortString): ShortString;
+begin
+  result := self+'/'+component;
+end;
+
+function TShortStringFileHelpers.AddExtension(extension: ShortString): ShortString;
+begin
+  result := self+'.'+extension;
+end;
+
+function MakePath (parts: array of const): ansistring;
+var
+  i: integer;
+begin
+  result := '';
+  for i := 0 to high(parts) do
+    begin
+      case parts[i].vtype of
+        vtString:
+          if parts[i].vstring^[1] = '/' then
+            result += parts[i].vstring^
+          else
+            result += '/'+parts[i].vstring^;
+        vtAnsiString:
+          if ansistring(parts[i].vansistring)[1] = '/' then
+            result += ansistring(parts[i].vansistring)
+          else
+            result += '/'+ansistring(parts[i].vansistring);
+        otherwise
+          fatal('can''t make path from non-string parts');
+      end;
+    end;
 end;
 
 var
@@ -253,14 +321,60 @@ begin
   SetCurrentDir(dir);
 end;
 
+// https://www.php.net/manual/en/function.tmpfile.php
+function tmpfile: ansistring;
+begin
+  result := GetTempDir.AddComponent(UUIDGen);
+  if not file_exists(result) then
+    file_put_contents(result, '');
+end;
+
+function tmpdir: ansistring;
+begin
+  result := GetTempDir.AddComponent(UUIDGen);
+  if not file_exists(result) then
+    mkdir(result);
+end;
+
+function copyfile(source: ansistring; dest: ansistring): boolean;
+var
+  stream: TMemoryStream;
+begin
+  {$ifdef DARWIN}
+  // on mac we need to use system calls or extended attributes won't get copied
+  source += #0;
+  dest += #0;
+  result := NSFileManager.defaultManager.copyItemAtPath_toPath_error(NSSTR(pchar(source)), NSSTR(pchar(dest)), nil);
+  {$else}
+  stream := TMemoryStream.Create;
+  try
+    stream.LoadFromFile(source);
+    stream.SaveToFile(dest); 
+    result := true;
+  except
+    result := false;
+  end;
+  stream.Free;
+  {$endif}
+end;
+
+function rename(source: ansistring; dest: ansistring): boolean;
+begin
+  result := fpRename(source, dest) = 0;
+end;
+
 function basename(path: ansistring; extension: boolean = true): ansistring;
+var
+  ext: string;
 begin
   if extension then
     result := ExtractFileName(path)
   else
     begin
       result := ExtractFileName(path);
-      result := copy(result,1,pos(ExtractFileExt(result),result)-1);
+      ext := ExtractFileExt(result);
+      if ext <> '' then
+        result := Copy(result, 1, pos(ext, result) - 1);
     end;
 end;
 
@@ -275,10 +389,11 @@ begin
   fpunlink(path);
 end;
 
-procedure mkdir(path: ansistring);
+function mkdir(path: ansistring): boolean;
 begin
   // TODO: where is this is system frameworks?
-  system.mkdir(path);
+  //system.mkdir(path);
+  result := CreateDir(path);
 end;
 
 function is_dir(path: ansistring): boolean;

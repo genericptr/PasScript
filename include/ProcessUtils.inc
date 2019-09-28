@@ -17,6 +17,9 @@ type
     fd: TFileDesc;
   end;
 
+var
+  SharedProcessBuffer: pchar;
+
 function popen(command: ansistring; modes: TFileModes = [mode_read]): TFileDesc;
 var 
   exitCode: pinteger;
@@ -55,20 +58,20 @@ end;
 function exec(command: ansistring; out exitCode: integer): ansistring;
 var
   fd: pointer;
-  buffer: pchar;
+  //buffer: pchar;
 begin
   command := command+chr(0);
   fd := _popen(pchar(command), 'r');
-  buffer := stralloc(kBufferSize);
+  //buffer := stralloc(kBufferSize);
   result := '';
   while true do 
     begin
-      if _fgets(buffer, kBufferSize, fd) <> nil then
-        result += buffer
+      if _fgets(SharedProcessBuffer, kBufferSize, fd) <> nil then
+        result += SharedProcessBuffer
       else
         break;
     end;
-  strdispose(buffer);
+  //strdispose(buffer);
   exitCode := _pclose(fd);
   // removing trailing null terminator
   if length(result) > 0 then
@@ -85,23 +88,24 @@ end;
 function passthru(command: ansistring): integer;
 var
   fd: pointer;
-  buffer: pchar;
+  //buffer: pchar;
 begin
   command := command+chr(0);
   fd := _popen(pchar(command), 'r');
-  buffer := stralloc(kBufferSize);
+  //buffer := stralloc(kBufferSize);
   while true do 
     begin
-      if _fgets(buffer, kBufferSize, fd) <> nil then
-        write(buffer)
+      if _fgets(SharedProcessBuffer, kBufferSize, fd) <> nil then
+        write(SharedProcessBuffer)
       else
         break;
     end;
-  strdispose(buffer);
+  //strdispose(buffer);
   result := _pclose(fd);
 end; 
 
 {$endif}
 
 {$ifdef CODE}
+SharedProcessBuffer := stralloc(kBufferSize);
 {$endif}

@@ -329,14 +329,14 @@ begin
           begin
             //writeln('new array');
             Consume(token);
-            list.value.AddTemp(TListValue.Create);
+            list.value.AddWithoutCopy(TListValue.Create);
             ParseArray(TListValue(list.value.Tail));
           end;
         kTokenCurlyBracketOpen:
           begin
             //writeln('new object');
             Consume(token);
-            list.value.AddTemp(TDictValue.Create);
+            list.value.AddWithoutCopy(TDictValue.Create);
             ParseObject(TDictValue(list.value.Tail));
           end;
         kTokenSquareBracketClosed:
@@ -349,7 +349,7 @@ begin
           begin
             value := ParseValue;
             //writeln('got:',value);
-            list.value.AddTemp(TValue(value));
+            list.value.AddWithoutCopy(TValue(value));
           end;
       end;
     end;

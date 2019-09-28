@@ -21,6 +21,7 @@ type
   TPattern = record
     ref: pointer;
     extraInfo: pointer;
+    class operator := (right: string): TPattern;
     class operator Finalize(var rec: TPattern);
   end;
 
@@ -34,6 +35,13 @@ function preg_split(pattern: string; subject: ansistring): TList;
 function preg_replace(pattern: string; replacement: string; subject: ansistring): ansistring;
 function preg_pattern(pattern: string; var compiled: TPattern): boolean;
 function preg_pattern(pattern: string): TPattern;
+
+type
+  TPatternArray = array[0..0] of TPattern;
+  PPatternArray = ^TPatternArray;
+
+function preg_match(patterns: PPatternArray; patternCount: integer; subject: ansistring): boolean; overload;
+function preg_match(patterns: array of TPattern; subject: ansistring): boolean; overload;
 
 {$endif}
 
@@ -213,6 +221,11 @@ function pcre_get_substring(subject: pchar; ovector: PIntArray; stringcount: cin
 
 // https://www.mitchr.me/SS/exampleCode/AUPG/pcre_example.c.html
 
+class operator TPattern.:= (right: string): TPattern;
+begin
+  result := preg_pattern(right);
+end;
+
 class operator TPattern.Finalize(var rec: TPattern);
 begin
   // TODO: crashes!
@@ -299,7 +312,7 @@ begin
               matchEnd := SharedRegex.vectors[i + 1];
               startOffset := matchEnd;
               matchStr := substr(subject, matchStart, matchEnd - matchStart);
-              matches.AddTemp(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
+              matches.AddWithoutCopy(TMatchValue.Create(matchStr, matchStart, matchEnd - matchStart));
               i += 2;
               dec(matchCount);
               result := true;
@@ -352,6 +365,29 @@ function preg_match(constref pattern: TPattern; subject: ansistring; out matches
 begin
   result := preg_match_internal('',  @pattern, subject, pattern.extraInfo, false, @matches);
 end;
+
+function preg_match(patterns: PPatternArray; patternCount: integer; subject: ansistring): boolean;
+var
+  pattern: string;
+  i: integer;
+begin
+  for i := 0 to patternCount - 1 do
+    if preg_match(patterns[i], subject) then
+      exit(true);
+  result := false;
+end;
+
+function preg_match(patterns: array of TPattern; subject: ansistring): boolean;
+var
+  pattern: string;
+  i: integer;
+begin
+  for i := 0 to high(patterns) do
+    if preg_match(patterns[i], subject) then
+      exit(true);
+  result := false;
+end;
+
 
 function preg_match_all(pattern: string; subject: ansistring; out matches: TList): boolean;
 begin
