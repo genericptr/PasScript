@@ -8,6 +8,10 @@ BUILD_DIR=`pwd`/build
 
 all:
 	mkdir -p $(BUILD_DIR)
+	rm -f $(BUILD_DIR)/pps.o
+	rm -f $(BUILD_DIR)/pps.ppu
+	rm -f $(BUILD_DIR)/PasScript.o
+	rm -f $(BUILD_DIR)/PasScript.ppu
 	$(COMPILER) -FU"$(BUILD_DIR)" -o"$(EXECUTABLE)" pps.pas
 
 install:
